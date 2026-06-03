@@ -1,0 +1,30 @@
+services:
+  # Frontend – Next.js static site served via Firebase (Render will host the build artifacts if needed)
+  - type: web
+    name: haris-frontend
+    env: node
+    plan: free
+    buildCommand: >
+      cd frontend && npm install && npm run build && npm run export
+    startCommand: >
+      npx serve -s out -l 3000
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: "${RENDER_BACKEND_URL}"
+    autoDeploy: true
+
+  # Backend – NestJS API
+  - type: web
+    name: haris-backend
+    env: node
+    plan: free
+    buildCommand: >
+      cd backend && npm install && npm run build
+    startCommand: >
+      npm run start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: haris-db
+      - key: JWT_SECRET
+        fromSecret: jwt-secret
+    autoDeploy: true

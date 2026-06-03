@@ -22,6 +22,10 @@ import { io, Socket } from 'socket.io-client';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
+import { UserSearchModal } from '@/components/layout/user-search-modal';
+
+
+
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -150,6 +154,13 @@ export default function ChatPage() {
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showUserSearchModal, setShowUserSearchModal] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+
+
 
   /* group modal */
   const [newGroupName, setNewGroupName] = useState('');
@@ -198,11 +209,19 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => {
-    if (!token) return;
-    fetchConversations();
-    fetchGroups();
-  }, [token, fetchConversations, fetchGroups]);
+    useEffect(() => {
+  if (!token) return;
+  // Fetch online users list
+  api.get('/users/online')
+    .then(res => setOnlineUsers(res.data ?? []))
+    .catch(() => setOnlineUsers([]));
+}, [token]);
+
+useEffect(() => {
+  if (!token) return;
+  fetchConversations();
+  fetchGroups();
+}, [token, fetchConversations, fetchGroups]);
 
   /* ---------------------------------------------------------------- */
   /*  Socket setup                                                     */
@@ -630,7 +649,11 @@ export default function ChatPage() {
                     activeChat?.id === conv.recipientId && 'bg-[hsl(var(--primary))]/10 border-l-2 border-[hsl(var(--primary))]',
                   )}
                 >
-                  <Avatar src={conv.avatarUrl} firstName={conv.firstName} lastName={conv.lastName} />
+                                  {/* presence indicator */}
+                <Avatar src={conv.avatarUrl} firstName={conv.firstName} lastName={conv.lastName} />
+                <span className="ml-1 flex h-2 w-2 rounded-full ring-2 ring-[hsl(var(--background))] "
+                  style={{ backgroundColor: onlineUsers.includes(conv.recipientId) ? '#22c55e' : '#ef4444' }}
+                />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">
@@ -683,15 +706,24 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* new group FAB */}
-        <div className="p-4">
-          <button
-            onClick={() => setShowGroupModal(true)}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] text-sm font-semibold text-[hsl(var(--primary-foreground))] shadow-lg shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-xl hover:shadow-[hsl(var(--primary))]/30 active:scale-[0.98]"
-          >
-            <Plus size={18} /> New Group
-          </button>
-        </div>
+        {/* new chat FAB */}
+          <div className="p-4">
+            <button
+              onClick={() => setShowUserSearchModal(true)}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] text-sm font-semibold text-[hsl(var(--primary-foreground))] shadow-lg shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-xl active:scale-[0.98]"
+            >
+              <MessageCircle size={18} /> New Chat
+            </button>
+          </div>
+          {/* new group FAB */}
+          <div className="p-4">
+            <button
+              onClick={() => setShowGroupModal(true)}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--primary))] text-sm font-semibold text-[hsl(var(--primary-foreground))] shadow-lg shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-xl active:scale-[0.98]"
+            >
+              <Plus size={18} /> New Group
+            </button>
+          </div>
       </aside>
 
       {/* ============================================================ */}
@@ -854,6 +886,7 @@ export default function ChatPage() {
             <div className="border-t border-[hsl(var(--border))] bg-[hsl(var(--card))]/60 px-4 py-3 backdrop-blur-xl">
               <div className="flex items-end gap-2">
                 {/* attach */}
+                                {/* attach */}
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -866,16 +899,57 @@ export default function ChatPage() {
                 >
                   <Paperclip size={18} />
                 </button>
+                {/* voice recorder */}
+                <button
+                  onClick={() => {
+                    if (!recording) {
+                      // start recording
+                      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                        const mr = new MediaRecorder(stream);
+                        const chunks: Blob[] = [];
+                        mr.ondataavailable = e => chunks.push(e.data);
+                        mr.onstop = () => {
+                          const blob = new Blob(chunks, { type: 'audio/webm' });
+                          const fd = new FormData();
+                          fd.append('file', blob, 'voice-message.webm');
+                          api.post('/chat/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => {
+                            const url = res.data?.url ?? res.data;
+                            sendMessage('Voice Message', url, 'audio/webm');
+                          }).finally(() => {
+                            setRecording(false);
+                            setMediaRecorder(null);
+                          });
+                        };
+                        mr.start();
+                        setMediaRecorder(mr);
+                        setRecording(true);
+                      });
+                    } else {
+                      // stop recording
+                      mediaRecorder?.stop();
+                    }
+                  }}
+                  disabled={recording && !mediaRecorder}
+                  className={cn(
+                    'shrink-0 rounded-xl p-2.5',
+                    recording ? 'bg-red-500 text-white' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]'
+                  )}
+                  title={recording ? 'Stop recording' : 'Record voice message'}
+                >
+                  {recording ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
 
-                {/* text input */}
-                <textarea
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type a message… 😊"
-                  rows={1}
-                  className="max-h-32 min-h-[40px] flex-1 resize-none rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-4 py-2.5 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))] transition focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
-                />
+                <button
+                  className={cn(
+                    'shrink-0 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]',
+                    uploading && 'animate-pulse',
+                  )}
+                  title="Attach file"
+                >
+                  <Paperclip size={18} />
+                </button>
+
+
 
                 {/* send */}
                 <button
