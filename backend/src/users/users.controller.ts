@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -20,4 +20,17 @@ export class UsersController {
   updateMe(@CurrentUser() user: any, @Body() dto: any) {
     return this.users.update(user.id, dto);
   }
+
+  /** Search platform members by name or email (used by chat "New Chat" modal). */
+  @Get('search')
+  search(@Query('q') q: string, @CurrentUser() user: any) {
+    return this.users.search(q ?? '', user.id);
+  }
+
+  /** Returns list of currently online user IDs. */
+  @Get('online')
+  online() {
+    return this.users.online();
+  }
 }
+

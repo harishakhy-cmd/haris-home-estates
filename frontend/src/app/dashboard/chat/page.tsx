@@ -1181,6 +1181,42 @@ useEffect(() => {
           scrollbar-color: hsl(var(--border)) transparent;
         }
       `}</style>
+
+      {/* ============================================================ */}
+      {/*  USER SEARCH MODAL – "New Chat"                               */}
+      {/* ============================================================ */}
+      {showUserSearchModal && (
+        <UserSearchModal
+          onClose={() => setShowUserSearchModal(false)}
+          onSelectUser={(selectedUser) => {
+            /* Immediately open a direct chat with this user */
+            setActiveChat({
+              id: selectedUser.id,
+              isGroup: false,
+              name: `${selectedUser.firstName} ${selectedUser.lastName}`,
+              avatarUrl: selectedUser.avatarUrl,
+            });
+            setShowMobileChat(true);
+            /* Add to conversations sidebar if not already present */
+            setConversations((prev) => {
+              if (prev.some((c) => c.recipientId === selectedUser.id)) return prev;
+              return [
+                {
+                  id: `conv-${selectedUser.id}`,
+                  recipientId: selectedUser.id,
+                  firstName: selectedUser.firstName,
+                  lastName: selectedUser.lastName,
+                  avatarUrl: selectedUser.avatarUrl,
+                  lastMessage: undefined,
+                  lastMessageAt: undefined,
+                  unread: 0,
+                },
+                ...prev,
+              ];
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
