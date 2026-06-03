@@ -41,7 +41,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 h-screen sticky top-0 border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]/40 backdrop-blur-xl shrink-0 z-30">
+    <aside className="hidden md:flex flex-col w-64 h-screen sticky top-0 border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]/40 backdrop-blur-xl shrink-0 z-30">
       {/* Brand Header */}
       <div className="flex items-center gap-3 px-6 h-16 border-b border-[hsl(var(--border))]">
         <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-wider text-[hsl(var(--foreground))]">
