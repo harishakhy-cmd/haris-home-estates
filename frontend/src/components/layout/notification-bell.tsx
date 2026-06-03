@@ -6,6 +6,8 @@ import { useAuthStore } from '@/store/auth-store';
 import { connectSocket, getSocket } from '@/lib/socket';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
 
 interface PropertyNotification {
   id: string;
@@ -18,6 +20,7 @@ interface PropertyNotification {
 }
 
 export function NotificationBell() {
+  const router = useRouter();
   const { user, token, hydrate } = useAuthStore();
   const [notifications, setNotifications] = useState<PropertyNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -71,7 +74,17 @@ export function NotificationBell() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <button
+        onClick={() => router.push('/auth')}
+        className="relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 hover:bg-[hsl(var(--muted))]"
+        aria-label="Notifications"
+      >
+        <Bell size={20} className="text-[hsl(var(--foreground))]" />
+      </button>
+    );
+  }
 
   return (
     <div className="relative" ref={dropdownRef}>

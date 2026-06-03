@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { Moon, Search, Sun, UserRound } from 'lucide-react';
+import { Moon, Search, Sun, UserRound, MessageCircle, Settings } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useEffect } from 'react';
 import { Button } from '../ui/button';
@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
 import { defaultAvatarForUser } from '@/lib/avatar';
 import { NotificationBell } from './notification-bell';
+import { useSettingsStore } from '@/store/settings-store';
+import { useRouter } from 'next/navigation';
+
 
 const navLinks = [
   { href: '/properties', label: 'Listings' },
@@ -19,8 +22,11 @@ const navLinks = [
 ];
 
 export function Header() {
+  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { user, hydrate } = useAuthStore();
+  const { setShowSettingsModal } = useSettingsStore();
+
 
   useEffect(() => {
     hydrate();
@@ -51,7 +57,14 @@ export function Header() {
             <Sun className="hidden dark:block" size={17} />
             <Moon className="dark:hidden" size={17} />
           </Button>
+          <Button aria-label="Appearance settings" className="size-11 bg-card p-0 text-foreground ring-1 ring-border" onClick={() => setShowSettingsModal(true)}>
+            <Settings size={17} />
+          </Button>
+          <Button aria-label="Chat Room" className="size-11 bg-card p-0 text-foreground ring-1 ring-border" onClick={() => router.push(user ? '/dashboard/chat' : '/auth')}>
+            <MessageCircle size={17} />
+          </Button>
           <NotificationBell />
+
           <Link href={user ? '/profile' : '/auth'} className="flex h-11 items-center gap-2 rounded-md bg-card px-2 pr-3 text-sm ring-1 ring-border transition hover:opacity-90">
             {user ? (
               <img src={defaultAvatarForUser(user)} alt={`${user.firstName} ${user.lastName}`} className="size-8 rounded-full object-cover" />

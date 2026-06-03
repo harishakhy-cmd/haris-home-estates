@@ -16,14 +16,16 @@ export function BottomNav() {
   }, [hydrate]);
 
   const profileHref = user ? '/profile' : '/auth';
+  const chatHref = user ? '/dashboard/chat' : '/auth';
 
   const navItems = [
     { href: '/', label: 'Home', icon: Home },
     { href: '/properties', label: 'Search', icon: Search },
-    { href: '/dashboard/chat', label: 'Chat', icon: MessageCircle },
+    { href: chatHref, label: 'Chat', icon: MessageCircle },
     { href: '/dashboard/tenant', label: 'Saved', icon: Heart },
     { href: profileHref, label: 'Account', icon: UserRound },
   ];
+
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/80 backdrop-blur-lg md:hidden">
