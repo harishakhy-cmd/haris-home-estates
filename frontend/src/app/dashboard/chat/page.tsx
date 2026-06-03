@@ -21,6 +21,7 @@ import {
   Ban,
   Flag,
   UserCheck,
+  UserPlus,
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { api } from '@/lib/api';
@@ -379,10 +380,10 @@ useEffect(() => {
       } else {
         payload.recipientId = activeChat.id;
       }
-      socket.emit('sendMessage', payload);
+      const optimisticId = `temp-${Date.now()}`;
       /* optimistic append */
       const optimistic: Message = {
-        id: `temp-${Date.now()}`,
+        id: optimisticId,
         senderId: user?.id ?? '',
         content,
         fileUrl,
@@ -391,6 +392,13 @@ useEffect(() => {
         ...(activeChat.isGroup ? { groupId: activeChat.id } : { recipientId: activeChat.id }),
       };
       setMessages((prev) => [...prev, optimistic]);
+
+      socket.emit('sendMessage', payload, (response: any) => {
+        if (response && response.error) {
+          toast.error(response.error);
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        }
+      });
     },
     [activeChat, user?.id],
   );
@@ -609,6 +617,17 @@ useEffect(() => {
       } catch (err) {
         toast.error('Failed to block user');
       }
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (!activeChat || activeChat.isGroup) return;
+    try {
+      await api.post(`/friendships/request/${activeChat.id}`);
+      toast.success('Friend request sent!');
+      setShowOptionsMenu(false);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to send request');
     }
   };
 
@@ -958,6 +977,12 @@ useEffect(() => {
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setShowOptionsMenu(false)} />
                         <div className="absolute right-0 top-full z-50 mt-1 w-40 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1 shadow-lg backdrop-blur-xl">
+                          <button
+                            onClick={handleAddFriend}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
+                          >
+                            <UserPlus size={14} /> Add Friend
+                          </button>
                           <button
                             onClick={handleBlockUser}
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-500 transition hover:bg-red-500/10"
@@ -1427,7 +1452,7 @@ useEffect(() => {
       {/* ============================================================ */}
       {showUserSearchModal && (
         <UserSearchModal
-          friendsOnly={true}
+          friendsOnly={false}
           onClose={() => setShowUserSearchModal(false)}
           onSelectUser={(selectedUser) => {
             /* Immediately open a direct chat with this user */
