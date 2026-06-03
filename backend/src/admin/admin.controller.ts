@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { PropertyStatus, UserRole } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { AdminService } from './admin.service';
+import { ApproveLandlordDto, ModerateListingDto } from './dto/admin.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -31,8 +32,8 @@ export class AdminController {
   }
 
   @Patch('landlords/:id/approval')
-  approveLandlord(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { approved: boolean; reason?: string }) {
-    return this.admin.approveLandlord(user.id, id, body.approved, body.reason);
+  approveLandlord(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: ApproveLandlordDto) {
+    return this.admin.approveLandlord(user.id, id, dto.approved, dto.reason);
   }
 
   @Get('listings')
@@ -45,8 +46,18 @@ export class AdminController {
     return this.admin.actions();
   }
 
+  @Delete('actions/clear')
+  clearActions() {
+    return this.admin.clearActions();
+  }
+
   @Patch('listings/:id/moderate')
-  moderate(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { status: PropertyStatus; reason?: string }) {
-    return this.admin.moderate(user.id, id, body.status, body.reason);
+  moderate(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: ModerateListingDto) {
+    return this.admin.moderate(user.id, id, dto.status, dto.reason);
+  }
+
+  @Delete('listings/:id')
+  deleteListing(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.admin.deleteListing(user.id, id);
   }
 }

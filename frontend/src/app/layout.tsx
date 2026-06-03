@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Providers } from './providers';
+import { BottomNav } from '@/components/layout/bottom-nav';
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hakhybeat.web.app';
 
@@ -68,7 +69,7 @@ export const metadata: Metadata = {
     },
   },
   verification: {
-    google: 'HR6SR4YsH7wsb0n8Y6xIurZfHsjj--zYctzMQJtsxqE',
+    google: 'nw51-t-FH-TJ3ipeOjZAhlqiV3r7elVimMDuMauSCbc',
   },
 };
 
@@ -76,7 +77,51 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <Providers>{children}</Providers>
+        <div
+          id="pwa-splash"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: '#0c101d',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 99999,
+            transition: 'opacity 0.5s ease, visibility 0.5s',
+          }}
+        >
+          <style
+            dangerouslySetInnerHTML={{
+              __html: `
+                @keyframes pulse {
+                  0%, 100% { transform: scale(0.9); opacity: 0.6; }
+                  50% { transform: scale(1.05); opacity: 1; filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.5)); }
+                }
+                .splash-pulse-logo {
+                  width: 140px;
+                  height: 140px;
+                  object-fit: contain;
+                  animation: pulse 1.8s infinite ease-in-out;
+                }
+                .splash-fade-out {
+                  opacity: 0 !important;
+                  visibility: hidden !important;
+                  pointer-events: none !important;
+                }
+              `,
+            }}
+          />
+          <img src="/haris-logo.png" className="splash-pulse-logo" alt="HARIS Logo" />
+        </div>
+        <Providers>
+          <div className="min-h-screen pb-16 md:pb-0">
+            {children}
+          </div>
+          <BottomNav />
+        </Providers>
       </body>
     </html>
   );

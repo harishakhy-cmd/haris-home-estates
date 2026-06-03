@@ -64,4 +64,24 @@ export class AdminService {
       take: 50,
     });
   }
+
+  async clearActions() {
+    return this.prisma.adminAction.deleteMany({});
+  }
+
+  async deleteListing(actorId: string, propertyId: string) {
+    const deletedProperty = await this.prisma.property.delete({
+      where: { id: propertyId },
+    });
+    await this.prisma.adminAction.create({
+      data: {
+        actorId,
+        action: 'LISTING_DELETED',
+        targetType: 'Property',
+        targetId: propertyId,
+        reason: 'Admin deleted listing',
+      },
+    });
+    return deletedProperty;
+  }
 }

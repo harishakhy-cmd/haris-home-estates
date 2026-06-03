@@ -23,7 +23,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   }));
 
   const propertyRoutes: MetadataRoute.Sitemap = fallbackProperties.map((property) => ({
-    url: `${siteUrl}/properties/${property.id}`,
+    url: `${siteUrl}/property/?id=${property.id}`,
     lastModified: now,
     changeFrequency: 'weekly',
     priority: 0.8,

@@ -232,7 +232,7 @@ export default function AdminPage() {
           <div className="border-b border-border p-5 font-semibold">Listing moderation queue</div>
           <div className="divide-y divide-border">
             {moderationQueue.map((property: any) => (
-              <div key={property.id} className="grid gap-4 p-5 md:grid-cols-[1fr_220px] md:items-center">
+              <div key={property.id} className="grid gap-4 p-5 md:grid-cols-[1fr_290px] md:items-center">
                 <div>
                   <p className="font-semibold">{property.title}</p>
                   <p className="text-sm text-muted-foreground">{property.district}, {property.city} · {property.propertyType} · {statuses[property.id] ?? property.status}</p>
@@ -240,6 +240,19 @@ export default function AdminPage() {
                 <div className="flex gap-2">
                   <Button className="h-9 flex-1" onClick={() => moderate(property.id, 'ACTIVE')}>Approve</Button>
                   <Button className="h-9 flex-1 bg-card text-foreground ring-1 ring-border" onClick={() => moderate(property.id, 'REJECTED')}>Reject</Button>
+                  <Button
+                    className="h-9 bg-destructive text-destructive-foreground hover:bg-destructive/90 px-3"
+                    onClick={async () => {
+                      if (window.confirm('Are you sure you want to permanently delete this listing?')) {
+                        try {
+                          await api.delete(`/admin/listings/${property.id}`);
+                          await Promise.all([listings.refetch(), analytics.refetch(), actions.refetch()]);
+                        } catch {}
+                      }
+                    }}
+                  >
+                    Delete
+                  </Button>
                 </div>
               </div>
             ))}
@@ -247,7 +260,23 @@ export default function AdminPage() {
           </div>
         </Card>
         <Card className="mt-8 overflow-hidden">
-          <div className="border-b border-border p-5 font-semibold">Admin activity log</div>
+          <div className="border-b border-border p-5 flex items-center justify-between">
+            <span className="font-semibold">Admin activity log</span>
+            <Button
+              className="h-8 bg-card text-foreground ring-1 ring-border text-xs px-3 hover:bg-muted"
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to clear the admin action activity log?')) {
+                  try {
+                    await api.delete('/admin/actions/clear');
+                    await actions.refetch();
+                    await analytics.refetch();
+                  } catch {}
+                }
+              }}
+            >
+              Clear history
+            </Button>
+          </div>
           <div className="divide-y divide-border">
             {(actions.data ?? []).map((action: any) => (
               <div key={action.id} className="grid gap-2 p-5 md:grid-cols-[1fr_180px] md:items-center">

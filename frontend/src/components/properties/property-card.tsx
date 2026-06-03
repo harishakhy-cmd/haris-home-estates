@@ -37,7 +37,7 @@ export function PropertyCard({ property }: { property: any }) {
   return (
     <Card className="group overflow-hidden">
       <div className="relative aspect-[4/3] overflow-hidden">
-        <Link href={`/properties/${property.id}`} className="block size-full">
+        <Link href={`/property/?id=${property.id}`} className="block size-full">
           <img src={image} alt={property.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
         </Link>
         <button
@@ -50,7 +50,7 @@ export function PropertyCard({ property }: { property: any }) {
           <Heart size={17} fill={saved ? 'currentColor' : 'none'} />
         </button>
       </div>
-      <Link href={`/properties/${property.id}`} className="block">
+      <Link href={`/property/?id=${property.id}`} className="block">
         <div className="space-y-3 p-4">
           <div>
             <h3 className="line-clamp-1 font-semibold">{property.title}</h3>

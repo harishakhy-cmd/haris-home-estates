@@ -14,6 +14,11 @@ export default function NewListingPage() {
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
   const [city, setCity] = useState('');
+  const [address, setAddress] = useState('');
+  const [propertyType, setPropertyType] = useState('APARTMENT');
+  const [bedrooms, setBedrooms] = useState('');
+  const [bathrooms, setBathrooms] = useState('');
+  const [description, setDescription] = useState('');
   const [editId, setEditId] = useState('');
   const [imageLinks, setImageLinks] = useState(['']);
   const [youtubeLinks, setYoutubeLinks] = useState(['']);
@@ -35,6 +40,11 @@ export default function NewListingPage() {
         setTitle(data.title ?? '');
         setPrice(String(data.price ?? ''));
         setCity(data.city ?? '');
+        setAddress(data.address ?? '');
+        setPropertyType(data.propertyType ?? 'APARTMENT');
+        setBedrooms(String(data.bedrooms ?? ''));
+        setBathrooms(String(data.bathrooms ?? ''));
+        setDescription(data.description ?? '');
         setImageLinks(data.images?.map((image: any) => image.url) ?? ['']);
         setYoutubeLinks(data.youtubeUrls?.length ? data.youtubeUrls : ['']);
         setAmenities(data.amenities?.map((amenity: any) => amenity.name) ?? ['']);
@@ -45,6 +55,11 @@ export default function NewListingPage() {
         setTitle(localProperty.title ?? '');
         setPrice(String(localProperty.price ?? ''));
         setCity(localProperty.city ?? '');
+        setAddress(localProperty.address ?? '');
+        setPropertyType(localProperty.propertyType ?? 'APARTMENT');
+        setBedrooms(String(localProperty.bedrooms ?? ''));
+        setBathrooms(String(localProperty.bathrooms ?? ''));
+        setDescription(localProperty.description ?? '');
         setImageLinks(localProperty.images?.map((image: any) => image.url) ?? ['']);
         setYoutubeLinks(localProperty.youtubeUrls?.length ? localProperty.youtubeUrls : ['']);
         setAmenities(localProperty.amenities?.map((amenity: any) => amenity.name) ?? ['']);
@@ -127,13 +142,13 @@ export default function NewListingPage() {
             const form = new FormData(event.currentTarget);
             const payload = {
               title,
-              price: Number(price),
+              price: Number(price.replace(/,/g, '')),
               city,
-              description: String(form.get('description')),
-              propertyType: String(form.get('propertyType')),
-              bedrooms: Number(form.get('bedrooms')),
-              bathrooms: Number(form.get('bathrooms')),
-              address: String(form.get('address')),
+              description,
+              propertyType,
+              bedrooms: Number(bedrooms || 0),
+              bathrooms: Number(bathrooms || 0),
+              address,
               imageUrls: imageLinks.filter(Boolean),
               youtubeUrls: youtubeLinks.filter(Boolean),
               amenityNames: amenities.filter(Boolean),
@@ -165,19 +180,19 @@ export default function NewListingPage() {
             <Input value={price} onChange={(event) => setPrice(event.target.value)} inputMode="numeric" placeholder="Monthly rent" />
             <Input value={city} onChange={(event) => setCity(event.target.value)} placeholder="City" />
           </div>
-          <Input name="address" placeholder="Street address or area" />
+          <Input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Street address or area" />
           <div className="grid gap-4 md:grid-cols-3">
-            <select name="propertyType" className="h-11 rounded-md border border-border bg-card px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30">
+            <select value={propertyType} onChange={(event) => setPropertyType(event.target.value)} className="h-11 rounded-md border border-border bg-card px-3 text-sm outline-none focus:ring-2 focus:ring-primary/30">
               <option value="APARTMENT">Apartment</option>
               <option value="HOUSE">House</option>
               <option value="HOSTEL">Hostel</option>
               <option value="OFFICE">Office</option>
               <option value="SHOP">Shop</option>
             </select>
-            <Input name="bedrooms" type="number" min="0" placeholder="Bedrooms" />
-            <Input name="bathrooms" type="number" min="0" placeholder="Bathrooms" />
+            <Input value={bedrooms} onChange={(event) => setBedrooms(event.target.value)} type="number" min="0" placeholder="Bedrooms" />
+            <Input value={bathrooms} onChange={(event) => setBathrooms(event.target.value)} type="number" min="0" placeholder="Bathrooms" />
           </div>
-          <textarea name="description" className="min-h-32 rounded-md border border-border bg-card p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30" placeholder="Describe the property, lease terms, facilities, and nearby services" />
+          <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-32 rounded-md border border-border bg-card p-3 text-sm outline-none focus:ring-2 focus:ring-primary/30" placeholder="Describe the property, lease terms, facilities, and nearby services" />
           <div className="space-y-3 rounded-md border border-dashed border-border p-4">
             <div className="flex items-center gap-2 font-semibold"><ImagePlus size={18} /> Google Drive photo links</div>
             {imageLinks.map((url, index) => (
