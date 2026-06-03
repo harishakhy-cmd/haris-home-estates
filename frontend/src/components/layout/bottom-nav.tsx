@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, Heart, UserRound } from 'lucide-react';
+import { Home, Search, Heart, UserRound, MessageCircle } from 'lucide-react';
 import { useAuthStore } from '@/store/auth-store';
 import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
@@ -20,6 +20,7 @@ export function BottomNav() {
   const navItems = [
     { href: '/', label: 'Home', icon: Home },
     { href: '/properties', label: 'Search', icon: Search },
+    { href: '/dashboard/chat', label: 'Chat', icon: MessageCircle },
     { href: '/dashboard/tenant', label: 'Saved', icon: Heart },
     { href: profileHref, label: 'Account', icon: UserRound },
   ];

@@ -8,9 +8,11 @@ const include = { images: true, amenities: true, landlord: { select: { id: true,
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 const cleanList = (items?: string[]) => (items ?? []).map((item) => item.trim()).filter(Boolean);
 
+import { ChatGateway } from '../chat/chat.gateway';
+
 @Injectable()
 export class PropertiesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly chatGateway: ChatGateway) {}
 
   async findAll(filter: PropertyFilterDto) {
     const where: Prisma.PropertyWhereInput = {
@@ -49,7 +51,7 @@ export class PropertiesService {
   async create(landlordId: string, dto: CreatePropertyDto) {
     const slug = `${slugify(dto.title)}-${Date.now().toString(36)}`;
     const amenityNames = cleanList(dto.amenityNames);
-    return this.prisma.property.create({
+    const property = await this.prisma.property.create({
       data: {
         title: dto.title,
         slug,
@@ -73,6 +75,11 @@ export class PropertiesService {
       },
       include,
     });
+    
+    // Broadcast notification to all online users via WebSocket
+    this.chatGateway.broadcastPropertyUpload(property);
+
+    return property;
   }
 
   async update(user: any, id: string, dto: UpdatePropertyDto) {

@@ -9,6 +9,7 @@ import { Button } from '../ui/button';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
 import { defaultAvatarForUser } from '@/lib/avatar';
+import { NotificationBell } from './notification-bell';
 
 const navLinks = [
   { href: '/properties', label: 'Listings' },
@@ -50,6 +51,7 @@ export function Header() {
             <Sun className="hidden dark:block" size={17} />
             <Moon className="dark:hidden" size={17} />
           </Button>
+          <NotificationBell />
           <Link href={user ? '/profile' : '/auth'} className="flex h-11 items-center gap-2 rounded-md bg-card px-2 pr-3 text-sm ring-1 ring-border transition hover:opacity-90">
             {user ? (
               <img src={defaultAvatarForUser(user)} alt={`${user.firstName} ${user.lastName}`} className="size-8 rounded-full object-cover" />

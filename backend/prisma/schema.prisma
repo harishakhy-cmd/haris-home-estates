@@ -115,6 +115,7 @@ model User {
   reviews         Review[]
   landlordReviewsGiven LandlordReview[] @relation("LandlordReviewAuthor")
   landlordReviewsReceived LandlordReview[] @relation("LandlordReviewTarget")
+  groupMembers    GroupMember[]
   notifications   Notification[]
   verifications   Verification[]
   adminActions    AdminAction[] @relation("AdminActor")
@@ -250,19 +251,49 @@ model Favorite {
   @@unique([userId, propertyId])
 }
 
+model ChatGroup {
+  id          String        @id @default(cuid())
+  name        String?
+  isGroup     Boolean       @default(false)
+  avatarUrl   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  members     GroupMember[]
+  messages    Message[]
+}
+
+model GroupMember {
+  id          String    @id @default(cuid())
+  groupId     String
+  userId      String
+  role        String    @default("MEMBER") // ADMIN, MEMBER
+  joinedAt    DateTime  @default(now())
+  group       ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
 model Message {
   id          String   @id @default(cuid())
   senderId    String
-  recipientId String
+  recipientId String?
+  groupId     String?
   propertyId  String?
   content     String
+  fileUrl     String?
+  fileType    String?
+  callId      String?
   readAt      DateTime?
-  sender      User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  recipient   User     @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  sender      User       @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient   User?      @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
+  group       ChatGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
 
   @@index([senderId, recipientId])
   @@index([recipientId, readAt])
+  @@index([groupId])
 }
 
 model Payment {
