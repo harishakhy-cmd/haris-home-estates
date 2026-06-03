@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Bath, BedDouble, CalendarDays, Heart, MapPin, MessageSquare, ShieldCheck } from 'lucide-react';
+import { Bath, BedDouble, CalendarDays, Heart, Loader2, MapPin, MessageSquare, Navigation, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Header } from '@/components/layout/header';
 import { PropertyCard } from '@/components/properties/property-card';
@@ -15,7 +15,7 @@ import { money } from '@/lib/utils';
 import { googleDriveImageUrl, whatsappUrl, youtubeEmbedUrl } from '@/lib/media';
 import { addTenantFavorite, addTenantViewed, isTenantFavorite, removeTenantFavorite, addLocalBooking, addLocalReview, addLocalInquiry } from '@/lib/tenant-activity';
 import { useAuthStore } from '@/store/auth-store';
-import { googleMapSearchUrl, googleMapUrl } from '@/lib/uganda-regions';
+import { googleMapDirectionsUrl, googleMapSearchUrl, googleMapUrl } from '@/lib/uganda-regions';
 
 type PropertyDetailClientProps = {
   propertyId: string;
@@ -32,6 +32,8 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
   const [landlordRating, setLandlordRating] = useState('5');
   const [landlordComment, setLandlordComment] = useState('');
   const [notice, setNotice] = useState('');
+  const [userLocation, setUserLocation] = useState('');
+  const [gpsLoading, setGpsLoading] = useState(false);
   const { user, token, hydrate } = useAuthStore();
   const { data } = useQuery({
     queryKey: ['property', propertyId],
@@ -175,6 +177,59 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"
                 />
+              </div>
+              <div className="mt-5 rounded-lg border border-border bg-muted/30 p-4">
+                <h3 className="flex items-center gap-2 font-semibold"><Navigation size={16} /> Get directions</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Enter your location or use GPS to get driving directions to this property.</p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    placeholder="e.g. Kampala, Ntinda, or use GPS →"
+                    value={userLocation}
+                    onChange={(event) => setUserLocation(event.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    className="shrink-0 bg-card text-foreground ring-1 ring-border"
+                    disabled={gpsLoading}
+                    onClick={() => {
+                      setGpsLoading(true);
+                      if (!navigator.geolocation) {
+                        setNotice('Your browser does not support GPS location.');
+                        setGpsLoading(false);
+                        return;
+                      }
+                      navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                          setUserLocation(`${position.coords.latitude},${position.coords.longitude}`);
+                          setGpsLoading(false);
+                          setNotice('GPS location detected! Click "Get Directions" to navigate.');
+                        },
+                        () => {
+                          setNotice('Could not detect location. Please allow location access or type your location manually.');
+                          setGpsLoading(false);
+                        },
+                        { enableHighAccuracy: true, timeout: 10000 }
+                      );
+                    }}
+                  >
+                    {gpsLoading ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+                    {gpsLoading ? 'Detecting...' : 'Use GPS'}
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  className="mt-3 w-full"
+                  onClick={() => {
+                    if (!userLocation.trim()) {
+                      setNotice('Please enter your current location or click "Use GPS" first.');
+                      return;
+                    }
+                    window.open(googleMapDirectionsUrl(userLocation, mapQuery), '_blank', 'noopener,noreferrer');
+                  }}
+                >
+                  <Navigation size={16} /> Get Directions
+                </Button>
               </div>
             </Card>
             <div>

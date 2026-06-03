@@ -123,7 +123,7 @@ export class PaymentsService {
       return {
         mode: 'mock',
         gatewayReference: `DGW-MOCK-${input.reference}`,
-        checkoutUrl: `${returnUrl ?? 'https://harisv2.web.app'}/profile?payment=${encodeURIComponent(input.reference)}`,
+        checkoutUrl: `${returnUrl ?? 'https://harishome.com'}/profile?payment=${encodeURIComponent(input.reference)}`,
       };
     }
 

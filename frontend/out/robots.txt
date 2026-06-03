@@ -4,4 +4,4 @@ Disallow: /admin
 Disallow: /dashboard
 Disallow: /profile
 
-Sitemap: https://harisv2.web.app/sitemap.xml
+Sitemap: https://harishome.com/sitemap.xml

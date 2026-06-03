@@ -42,3 +42,7 @@ export function googleMapUrl(query: string, satellite = false, zoom = 7) {
 export function googleMapSearchUrl(query: string) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
+
+export function googleMapDirectionsUrl(origin: string, destination: string) {
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+}
