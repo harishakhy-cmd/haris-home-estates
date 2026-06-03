@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { api } from '@/lib/api';
 import { useSettingsStore, colorThemes } from '@/store/settings-store';
 import { SettingsModal } from '@/components/layout/settings-modal';
+import { Toaster } from 'sonner';
 
 function DynamicThemeManager() {
   const { primaryColor, fontFamily, hydrateSettings } = useSettingsStore();
@@ -73,6 +74,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <DynamicThemeManager />
         {children}
         <SettingsModal />
+        <Toaster theme="system" position="bottom-right" richColors />
       </ThemeProvider>
     </QueryClientProvider>
   );

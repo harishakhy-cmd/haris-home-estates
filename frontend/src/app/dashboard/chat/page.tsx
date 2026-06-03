@@ -17,12 +17,18 @@ import {
   MicOff,
   Video as VideoIcon,
   VideoOff,
+  MoreVertical,
+  Ban,
+  Flag,
+  UserCheck,
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
 import { UserSearchModal } from '@/components/layout/user-search-modal';
+import { FriendRequestsModal } from '@/components/layout/friend-requests-modal';
+import { toast } from 'sonner';
 
 
 
@@ -168,6 +174,13 @@ export default function ChatPage() {
   const [messageInput, setMessageInput] = useState('');
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [showUserSearchModal, setShowUserSearchModal] = useState(false);
+  const [showFriendRequestsModal, setShowFriendRequestsModal] = useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('Harassment');
+  const [reportDesc, setReportDesc] = useState('');
+  
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   const onlineUserIds = onlineUsers.map((u) => u.id);
 
@@ -230,6 +243,10 @@ export default function ChatPage() {
   api.get('/users/online')
     .then(res => setOnlineUsers(res.data ?? []))
     .catch(() => setOnlineUsers([]));
+    
+  api.get('/friendships/pending')
+    .then(res => setPendingRequestsCount(res.data?.length ?? 0))
+    .catch(() => setPendingRequestsCount(0));
 }, [token]);
 
 useEffect(() => {
@@ -281,6 +298,12 @@ useEffect(() => {
 
     socket.on('userOnline', () => refreshOnline());
     socket.on('userOffline', () => refreshOnline());
+
+    socket.on('friendRequestReceived', () => {
+      api.get('/friendships/pending')
+        .then(res => setPendingRequestsCount(res.data?.length ?? 0))
+        .catch(() => setPendingRequestsCount(0));
+    });
 
 
 
@@ -570,6 +593,38 @@ useEffect(() => {
   };
 
   /* ---------------------------------------------------------------- */
+  /*  Block & Report                                                   */
+  /* ---------------------------------------------------------------- */
+
+  const handleBlockUser = async () => {
+    if (!activeChat || activeChat.isGroup) return;
+    if (confirm(`Are you sure you want to block ${activeChat.name}?`)) {
+      try {
+        await api.post(`/friendships/block/${activeChat.id}`);
+        toast.success(`Blocked ${activeChat.name}`);
+        setConversations(prev => prev.filter(c => c.recipientId !== activeChat.id));
+        setActiveChat(null);
+        setShowMobileChat(false);
+        setShowOptionsMenu(false);
+      } catch (err) {
+        toast.error('Failed to block user');
+      }
+    }
+  };
+
+  const submitReport = async () => {
+    if (!activeChat || activeChat.isGroup) return;
+    try {
+      await api.post(`/reports/${activeChat.id}`, { reason: reportReason, description: reportDesc });
+      toast.success('Report submitted successfully');
+      setShowReportModal(false);
+      setReportDesc('');
+    } catch {
+      toast.error('Failed to submit report');
+    }
+  };
+
+  /* ---------------------------------------------------------------- */
   /*  Filtered lists                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -616,7 +671,20 @@ useEffect(() => {
       >
         {/* header */}
         <div className="space-y-3 border-b border-[hsl(var(--border))] px-4 pb-3 pt-5">
-          <h1 className="text-xl font-bold tracking-tight text-[hsl(var(--foreground))]">Messages</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold tracking-tight text-[hsl(var(--foreground))]">Messages</h1>
+            <button
+              onClick={() => setShowFriendRequestsModal(true)}
+              className="relative flex items-center justify-center rounded-lg bg-[hsl(var(--muted))]/50 p-2 text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
+            >
+              <UserCheck size={18} />
+              {pendingRequestsCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white shadow">
+                  {pendingRequestsCount}
+                </span>
+              )}
+            </button>
+          </div>
 
           {/* tabs */}
           <div className="flex rounded-xl bg-[hsl(var(--muted))]/60 p-1">
@@ -877,6 +945,35 @@ useEffect(() => {
                   >
                     <Video size={18} />
                   </button>
+                  
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowOptionsMenu(!showOptionsMenu)}
+                      className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]"
+                      title="Options"
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+                    {showOptionsMenu && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowOptionsMenu(false)} />
+                        <div className="absolute right-0 top-full z-50 mt-1 w-40 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1 shadow-lg backdrop-blur-xl">
+                          <button
+                            onClick={handleBlockUser}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-500 transition hover:bg-red-500/10"
+                          >
+                            <Ban size={14} /> Block User
+                          </button>
+                          <button
+                            onClick={() => { setShowReportModal(true); setShowOptionsMenu(false); }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
+                          >
+                            <Flag size={14} /> Report
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1275,10 +1372,62 @@ useEffect(() => {
       `}</style>
 
       {/* ============================================================ */}
+      {/*  REPORT MODAL                                                 */}
+      {/* ============================================================ */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowReportModal(false)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="mx-4 w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-2xl"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-[hsl(var(--foreground))]">Report User</h3>
+              <button onClick={() => setShowReportModal(false)} className="rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60">
+                <X size={18} />
+              </button>
+            </div>
+            <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--muted-foreground))]">Reason</label>
+            <select
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              className="mb-4 h-10 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-3 text-sm text-[hsl(var(--foreground))] outline-none focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
+            >
+              <option value="Harassment">Harassment</option>
+              <option value="Spam">Spam</option>
+              <option value="Inappropriate Content">Inappropriate Content</option>
+              <option value="Fraud/Scam">Fraud/Scam</option>
+              <option value="Other">Other</option>
+            </select>
+            <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--muted-foreground))]">Description (optional)</label>
+            <textarea
+              value={reportDesc}
+              onChange={(e) => setReportDesc(e.target.value)}
+              placeholder="Provide more details..."
+              className="mb-5 min-h-[80px] w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-3 text-sm text-[hsl(var(--foreground))] outline-none focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
+            />
+            <button
+              onClick={submitReport}
+              className="h-11 w-full rounded-xl bg-red-500 text-sm font-semibold text-white shadow-lg shadow-red-500/25 transition-all duration-200 hover:bg-red-600 active:scale-[0.98]"
+            >
+              Submit Report
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/*  FRIEND REQUESTS MODAL                                        */}
+      {/* ============================================================ */}
+      {showFriendRequestsModal && (
+        <FriendRequestsModal onClose={() => { setShowFriendRequestsModal(false); api.get('/friendships/pending').then(res => setPendingRequestsCount(res.data?.length ?? 0)).catch(()=>{}); }} />
+      )}
+
+      {/* ============================================================ */}
       {/*  USER SEARCH MODAL – "New Chat"                               */}
       {/* ============================================================ */}
       {showUserSearchModal && (
         <UserSearchModal
+          friendsOnly={true}
           onClose={() => setShowUserSearchModal(false)}
           onSelectUser={(selectedUser) => {
             /* Immediately open a direct chat with this user */

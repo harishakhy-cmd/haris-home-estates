@@ -12,6 +12,7 @@ import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../auth/ws-jwt.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { markUserOnline, markUserOffline } from '../users/users.service';
+import { FriendshipsService } from '../friendships/friendships.service';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -23,7 +24,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Map userId to Set of socket ids for tracking online presence
   private activeUsers = new Map<string, Set<string>>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly friendshipsService: FriendshipsService,
+  ) {}
 
   async handleConnection(client: Socket) {
     // Connection is established. We don't authenticate yet, clients will send auth token via handshake
@@ -84,6 +88,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         where: { groupId_userId: { groupId: payload.groupId, userId: user.sub } },
       });
       if (!member) return { error: 'Not a member of this group' };
+    } else if (payload.recipientId) {
+      const canChat = await this.friendshipsService.areFriendsAndNotBlocked(user.sub, payload.recipientId);
+      if (!canChat) {
+        return { error: 'You can only message confirmed friends who have not blocked you' };
+      }
     }
 
     const message = await this.prisma.message.create({
@@ -149,9 +158,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // WebRTC Signaling
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcOffer')
-  handleWebRtcOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp: any; isVideo: boolean }) {
+  async handleWebRtcOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp: any; isVideo: boolean }) {
+    const callerId = client.data.user.sub;
+    const canCall = await this.friendshipsService.areFriendsAndNotBlocked(callerId, payload.targetId);
+    if (!canCall) return;
+
     this.server.to(`user_${payload.targetId}`).emit('webrtcOffer', {
-      callerId: client.data.user.sub,
+      callerId,
       sdp: payload.sdp,
       isVideo: payload.isVideo,
     });
@@ -159,18 +172,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcAnswer')
-  handleWebRtcAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp: any }) {
+  async handleWebRtcAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp: any }) {
+    const responderId = client.data.user.sub;
+    const canCall = await this.friendshipsService.areFriendsAndNotBlocked(responderId, payload.targetId);
+    if (!canCall) return;
+
     this.server.to(`user_${payload.targetId}`).emit('webrtcAnswer', {
-      responderId: client.data.user.sub,
+      responderId,
       sdp: payload.sdp,
     });
   }
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcIceCandidate')
-  handleWebRtcIceCandidate(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; candidate: any }) {
+  async handleWebRtcIceCandidate(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; candidate: any }) {
+    const senderId = client.data.user.sub;
+    const canCall = await this.friendshipsService.areFriendsAndNotBlocked(senderId, payload.targetId);
+    if (!canCall) return;
+
     this.server.to(`user_${payload.targetId}`).emit('webrtcIceCandidate', {
-      senderId: client.data.user.sub,
+      senderId,
       candidate: payload.candidate,
     });
   }

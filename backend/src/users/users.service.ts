@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { FriendshipStatus } from '@prisma/client';
 
 /* In-memory online presence store ----------------------------------- */
 const onlineUserIds = new Set<string>();
@@ -53,7 +54,7 @@ export class UsersService {
     });
   }
 
-  /** Search users by name, email, phone or whatsapp (case-insensitive). */
+  /** Search users by name, email, phone or whatsapp (case-insensitive) excluding blocked users. */
   async search(q: string, excludeId?: string) {
     const term = q?.trim() ?? '';
 
@@ -70,9 +71,28 @@ export class UsersService {
         ]
       : undefined;
 
+    // Exclude users who have blocked current user or who are blocked by current user
+    const blockedIds = new Set<string>();
+    if (excludeId) {
+      const blocks = await this.prisma.block.findMany({
+        where: {
+          OR: [
+            { blockerId: excludeId },
+            { blockedId: excludeId },
+          ],
+        },
+        select: { blockerId: true, blockedId: true },
+      });
+      blocks.forEach((b) => {
+        blockedIds.add(b.blockerId);
+        blockedIds.add(b.blockedId);
+      });
+      blockedIds.add(excludeId);
+    }
+
     return this.prisma.user.findMany({
       where: {
-        id: excludeId ? { not: excludeId } : undefined,
+        id: excludeId ? { notIn: Array.from(blockedIds) } : undefined,
         OR,
       },
       select: {
@@ -92,13 +112,65 @@ export class UsersService {
     });
   }
 
-  /** Return list of currently online users (full objects). */
+  /** Return list of currently online users who are confirmed friends and not blocked (full objects). */
   async online(excludeId?: string) {
     const ids = getOnlineUserIds();
-    const filteredIds = excludeId ? ids.filter(id => id !== excludeId) : ids;
+    
+    if (!excludeId) {
+      return this.prisma.user.findMany({
+        where: {
+          id: { in: ids },
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          whatsapp: true,
+          avatarUrl: true,
+          role: true,
+          location: true,
+          verified: true,
+        },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      });
+    }
+
+    // Fetch accepted friendships for current user
+    const friendships = await this.prisma.friendship.findMany({
+      where: {
+        status: FriendshipStatus.ACCEPTED,
+        OR: [
+          { senderId: excludeId },
+          { receiverId: excludeId },
+        ],
+      },
+      select: { senderId: true, receiverId: true },
+    });
+
+    const friendIds = friendships.map(f => f.senderId === excludeId ? f.receiverId : f.senderId);
+
+    // Filter to only online friends
+    const onlineFriendIds = friendIds.filter(id => ids.includes(id));
+
+    // Exclude any blocked contacts (insurance)
+    const blocks = await this.prisma.block.findMany({
+      where: {
+        OR: [
+          { blockerId: excludeId, blockedId: { in: onlineFriendIds } },
+          { blockerId: { in: onlineFriendIds }, blockedId: excludeId },
+        ],
+      },
+      select: { blockerId: true, blockedId: true },
+    });
+
+    const blockedIds = new Set(blocks.map(b => b.blockerId === excludeId ? b.blockedId : b.blockerId));
+    const finalOnlineFriendIds = onlineFriendIds.filter(id => !blockedIds.has(id));
+
     return this.prisma.user.findMany({
       where: {
-        id: { in: filteredIds },
+        id: { in: finalOnlineFriendIds },
       },
       select: {
         id: true,

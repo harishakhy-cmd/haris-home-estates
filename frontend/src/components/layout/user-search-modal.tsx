@@ -21,9 +21,10 @@ type User = {
 interface Props {
   onClose: () => void;
   onSelectUser: (user: User) => void;
+  friendsOnly?: boolean;
 }
 
-export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
+export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser, friendsOnly }) => {
   const [query, setQuery]         = useState('');
   const [allUsers, setAllUsers]   = useState<User[]>([]);
   const [results, setResults]     = useState<User[]>([]);
@@ -34,8 +35,12 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
   /* Load ALL platform users + online list on mount */
   useEffect(() => {
     setLoading(true);
+    const usersPromise = friendsOnly 
+      ? api.get('/friendships') 
+      : api.get('/users/search', { params: { q: '' } });
+
     Promise.all([
-      api.get('/users/search', { params: { q: '' } }).catch(() => ({ data: [] })),
+      usersPromise.catch(() => ({ data: [] })),
       api.get('/users/online').catch(() => ({ data: [] })),
     ]).then(([usersRes, onlineRes]) => {
       const users: User[] = usersRes.data ?? [];
@@ -54,7 +59,7 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
       setAllUsers(sortedUsers);
       setResults(sortedUsers);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [friendsOnly]);
 
   /* Debounced live search – 300 ms */
   const runSearch = useCallback((q: string) => {
@@ -75,7 +80,11 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
 
     // Confirm with server (may find users not yet loaded client-side)
     setSearching(true);
-    api.get('/users/search', { params: { q: term } })
+    const searchPromise = friendsOnly
+      ? Promise.resolve({ data: local }) // already have all friends locally
+      : api.get('/users/search', { params: { q: term } });
+      
+    searchPromise
       .then(res => {
         const resUsers: User[] = res.data ?? [];
         const sorted = [...resUsers].sort((a, b) => {
@@ -89,7 +98,7 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
       })
       .catch(() => { /* keep local results on error */ })
       .finally(() => setSearching(false));
-  }, [allUsers, onlineIds]);
+  }, [allUsers, onlineIds, friendsOnly]);
 
   useEffect(() => {
     const t = setTimeout(() => runSearch(query), 300);
