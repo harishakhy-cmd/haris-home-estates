@@ -53,23 +53,42 @@ export class UsersService {
     });
   }
 
-  /** Search users by first name, last name, or email (case-insensitive). */
+  /** Search users by name, email, phone or whatsapp (case-insensitive). */
   async search(q: string, excludeId?: string) {
     const term = q?.trim() ?? '';
+
+    // Build OR filter – include every field a user might identify themselves by
+    const OR = term
+      ? [
+          { firstName: { contains: term, mode: 'insensitive' as const } },
+          { lastName:  { contains: term, mode: 'insensitive' as const } },
+          { email:     { contains: term, mode: 'insensitive' as const } },
+          { phone:     { contains: term, mode: 'insensitive' as const } },
+          { whatsapp:  { contains: term, mode: 'insensitive' as const } },
+          { location:  { contains: term, mode: 'insensitive' as const } },
+          { bio:       { contains: term, mode: 'insensitive' as const } },
+        ]
+      : undefined;
+
     return this.prisma.user.findMany({
       where: {
         id: excludeId ? { not: excludeId } : undefined,
-        OR: term
-          ? [
-              { firstName: { contains: term, mode: 'insensitive' } },
-              { lastName:  { contains: term, mode: 'insensitive' } },
-              { email:     { contains: term, mode: 'insensitive' } },
-            ]
-          : undefined,
+        OR,
       },
-      select: { id: true, firstName: true, lastName: true, avatarUrl: true, role: true },
-      take: 30,
-      orderBy: { firstName: 'asc' },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        whatsapp: true,
+        avatarUrl: true,
+        role: true,
+        location: true,
+        verified: true,
+      },
+      take: 50,
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });
   }
 

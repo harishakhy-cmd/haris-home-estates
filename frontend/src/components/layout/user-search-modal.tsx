@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Search, MessageCircle, Loader2 } from 'lucide-react';
+import { X, Search, MessageCircle, Loader2, CheckCircle2, MapPin, Phone } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -9,8 +9,13 @@ type User = {
   id: string;
   firstName: string;
   lastName: string;
+  email?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
   avatarUrl?: string | null;
   role?: string;
+  location?: string | null;
+  verified?: boolean;
 };
 
 interface Props {
@@ -33,31 +38,35 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
       api.get('/users/search', { params: { q: '' } }).catch(() => ({ data: [] })),
       api.get('/users/online').catch(() => ({ data: [] })),
     ]).then(([usersRes, onlineRes]) => {
-      const users = usersRes.data ?? [];
+      const users: User[] = usersRes.data ?? [];
       setAllUsers(users);
       setResults(users);
       setOnlineIds(onlineRes.data ?? []);
     }).finally(() => setLoading(false));
   }, []);
 
-  /* Live search – debounced 300 ms */
+  /* Debounced live search – 300 ms */
   const runSearch = useCallback((q: string) => {
-    const term = q.trim().toLowerCase();
+    const term = q.trim();
+
     if (!term) {
       setResults(allUsers);
       return;
     }
+
+    // Client-side filter first for instant feedback
+    const lower = term.toLowerCase();
+    const local = allUsers.filter(u =>
+      [u.firstName, u.lastName, u.email, u.phone, u.whatsapp, u.location]
+        .some(v => v?.toLowerCase().includes(lower)),
+    );
+    setResults(local);
+
+    // Confirm with server (may find users not yet loaded client-side)
     setSearching(true);
     api.get('/users/search', { params: { q: term } })
       .then(res => setResults(res.data ?? []))
-      .catch(() => {
-        /* fallback to client-side filter */
-        setResults(
-          allUsers.filter(u =>
-            `${u.firstName} ${u.lastName}`.toLowerCase().includes(term),
-          ),
-        );
-      })
+      .catch(() => { /* keep local results on error */ })
       .finally(() => setSearching(false));
   }, [allUsers]);
 
@@ -78,13 +87,22 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
     return role.charAt(0) + role.slice(1).toLowerCase();
   }
 
+  /** Best contact hint to show under the name */
+  function contactHint(user: User): string {
+    if (user.email) return user.email;
+    if (user.phone) return user.phone;
+    if (user.whatsapp) return `WhatsApp: ${user.whatsapp}`;
+    if (user.location) return user.location;
+    return '';
+  }
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl"
+        className="w-full max-w-md rounded-t-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-2xl sm:rounded-2xl"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -106,90 +124,129 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
           <div className="relative">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
             {searching && (
-              <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[hsl(var(--primary))]" />
+              <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[hsl(var(--primary))]" />
             )}
             <input
               autoFocus
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search by name or email…"
+              placeholder="Name, email, phone or location…"
               className="h-10 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 pl-9 pr-9 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))] transition focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
             />
           </div>
+          {query && (
+            <p className="mt-1.5 text-[11px] text-[hsl(var(--muted-foreground))]">
+              {results.length} result{results.length !== 1 ? 's' : ''} for "<span className="font-medium">{query}</span>"
+            </p>
+          )}
         </div>
 
         {/* List */}
-        <div className="max-h-72 overflow-y-auto pb-3 scrollbar-thin">
+        <div className="max-h-[360px] overflow-y-auto pb-2 scrollbar-thin">
           {loading && (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-[hsl(var(--muted-foreground))]">
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-[hsl(var(--muted-foreground))]">
               <Loader2 size={18} className="animate-spin" /> Loading members…
             </div>
           )}
 
           {!loading && results.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-              <Search size={28} className="text-[hsl(var(--muted-foreground))]/40" />
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                {query ? `No members found for "${query}"` : 'No members on the platform yet.'}
-              </p>
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <Search size={32} className="text-[hsl(var(--muted-foreground))]/30" />
+              <div>
+                <p className="text-sm font-medium text-[hsl(var(--foreground))]">No members found</p>
+                <p className="mt-0.5 text-xs text-[hsl(var(--muted-foreground))]">
+                  Try searching by first name, last name, email, phone, or WhatsApp number
+                </p>
+              </div>
             </div>
           )}
 
           {!loading && results.map(user => {
             const isOnline = onlineIds.includes(user.id);
+            const hint = contactHint(user);
+
             return (
               <button
                 key={user.id}
                 onClick={() => { onSelectUser(user); onClose(); }}
-                className={cn(
-                  'flex w-full items-center gap-3 px-5 py-2.5 text-left transition-all duration-150',
-                  'hover:bg-[hsl(var(--muted))]/50',
-                )}
+                className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors duration-150 hover:bg-[hsl(var(--muted))]/50 active:bg-[hsl(var(--muted))]/80"
               >
-                {/* Avatar */}
+                {/* Avatar + online dot */}
                 <div className="relative shrink-0">
                   {user.avatarUrl ? (
                     <img
                       src={user.avatarUrl}
                       alt=""
-                      className="h-9 w-9 rounded-full object-cover ring-2 ring-[hsl(var(--border))]"
+                      className="h-10 w-10 rounded-full object-cover ring-2 ring-[hsl(var(--border))]"
                     />
                   ) : (
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[hsl(var(--primary))]/15 text-xs font-semibold text-[hsl(var(--primary))]">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[hsl(var(--primary))]/15 text-sm font-bold text-[hsl(var(--primary))]">
                       {user.firstName?.[0] ?? '?'}{user.lastName?.[0] ?? ''}
                     </div>
                   )}
-                  {/* Online dot */}
                   <span
                     className={cn(
-                      'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[hsl(var(--card))]',
-                      isOnline ? 'bg-emerald-400' : 'bg-[hsl(var(--muted-foreground))]/50',
+                      'absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[hsl(var(--card))]',
+                      isOnline ? 'bg-emerald-400' : 'bg-[hsl(var(--muted-foreground))]/40',
                     )}
                   />
                 </div>
 
                 {/* Info */}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">
-                    {user.firstName} {user.lastName}
-                  </p>
-                  <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-                    {isOnline ? '🟢 Online' : '⚫ Offline'}
-                    {user.role ? ` · ${roleLabel(user.role)}` : ''}
-                  </p>
+                  {/* Name row */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">
+                      {user.firstName} {user.lastName}
+                    </span>
+                    {user.verified && (
+                      <CheckCircle2 size={13} className="shrink-0 text-[hsl(var(--primary))]" />
+                    )}
+                  </div>
+
+                  {/* Subtitle row */}
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={cn(
+                      'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                      isOnline
+                        ? 'bg-emerald-400/15 text-emerald-500'
+                        : 'bg-[hsl(var(--muted))]/60 text-[hsl(var(--muted-foreground))]',
+                    )}>
+                      {isOnline ? 'Online' : 'Offline'}
+                    </span>
+
+                    {user.role && (
+                      <span className="shrink-0 rounded-full bg-[hsl(var(--primary))]/10 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--primary))]">
+                        {roleLabel(user.role)}
+                      </span>
+                    )}
+
+                    {hint && (
+                      <span className="flex min-w-0 items-center gap-0.5 truncate text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {(user.phone || user.whatsapp) && !user.email
+                          ? <Phone size={10} className="shrink-0" />
+                          : user.location && !user.email && !user.phone
+                          ? <MapPin size={10} className="shrink-0" />
+                          : null}
+                        <span className="truncate">{hint}</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {/* Chat icon hint */}
-                <MessageCircle size={15} className="shrink-0 text-[hsl(var(--muted-foreground))]/50" />
+                {/* Chat caret */}
+                <MessageCircle size={15} className="shrink-0 text-[hsl(var(--primary))]/40" />
               </button>
             );
           })}
         </div>
 
-        {/* Footer hint */}
-        {!loading && results.length > 0 && (
+        {/* Footer */}
+        {!loading && (
           <div className="border-t border-[hsl(var(--border))] px-5 py-3 text-center text-[11px] text-[hsl(var(--muted-foreground))]">
-            {results.length} member{results.length !== 1 ? 's' : ''} · Click to start chatting
+            {results.length > 0
+              ? `${results.length} member${results.length !== 1 ? 's' : ''} — click to start chatting`
+              : 'Search by name · email · phone · WhatsApp · location'}
           </div>
         )}
       </div>
