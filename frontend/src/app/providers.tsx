@@ -17,7 +17,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       const timer = setTimeout(() => {
         splash.classList.add('splash-fade-out');
         setTimeout(() => {
-          splash.remove();
+          splash.style.display = 'none';
         }, 500);
       }, 500);
       return () => clearTimeout(timer);

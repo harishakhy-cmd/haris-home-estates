@@ -89,6 +89,8 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
     } catch {}
   }
 
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+
   function checkoutToWhatsApp() {
     if (!tenantName || !tenantContact || !viewingDate) {
       setNotice('Fill your name, WhatsApp/contact, and viewing date before checkout.');
@@ -110,6 +112,44 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
       `Property link: ${window.location.href}`,
     ].filter(Boolean).join('\n');
     window.open(whatsappUrl(landlordWhatsApp, text), '_blank', 'noopener,noreferrer');
+  }
+
+  async function checkoutViaMobileMoney() {
+    if (!token) {
+      setNotice('Please sign in to proceed with Mobile Money checkout.');
+      return;
+    }
+    if (!tenantName || !tenantContact || !viewingDate) {
+      setNotice('Fill your name, contact, and viewing date before checkout.');
+      return;
+    }
+    setCheckoutLoading(true);
+    setNotice('');
+    try {
+      try {
+         await api.post('/bookings', { propertyId: property.id, viewingDate, notes: bookingNote || `Mobile Money Checkout` });
+      } catch (e) {}
+
+      const { data } = await api.post('/payments/intent', {
+        amount: Number(property.price),
+        provider: 'DGATEWAY',
+        propertyId: property.id,
+        currency: property.currency || 'UGX',
+        customerPhone: tenantContact,
+        returnUrl: `${window.location.origin}/property/?id=${property.id}&payment=success`,
+      });
+
+      if (data?.metadata?.checkoutUrl) {
+        window.location.href = data.metadata.checkoutUrl;
+      } else {
+        setNotice('Payment initialized, but no checkout URL was returned.');
+      }
+    } catch (error: any) {
+      console.error(error);
+      setNotice(error.response?.data?.message || 'Failed to initialize mobile money checkout. Please try again.');
+    } finally {
+      setCheckoutLoading(false);
+    }
   }
 
   return (
@@ -301,7 +341,15 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
               <Input type="date" value={moveInDate} onChange={(event) => setMoveInDate(event.target.value)} />
               <Input placeholder="Your note" value={bookingNote} onChange={(event) => setBookingNote(event.target.value)} />
               <Button type="submit" className="w-full"><CalendarDays size={17} /> Request viewing</Button>
-              <Button type="button" className="w-full bg-[#25D366] text-white" onClick={checkoutToWhatsApp}>Checkout via WhatsApp</Button>
+              <div className="flex gap-2">
+                <Button type="button" className="flex-1 bg-blue-600 text-white hover:bg-blue-700" disabled={checkoutLoading} onClick={checkoutViaMobileMoney}>
+                  {checkoutLoading ? <Loader2 size={16} className="mr-1 animate-spin" /> : null}
+                  Mobile Money Checkout
+                </Button>
+                <Button type="button" className="flex-1 bg-[#25D366] text-white hover:bg-[#20bd5a]" onClick={checkoutToWhatsApp}>
+                  WhatsApp Checkout
+                </Button>
+              </div>
             </Card>
             <Card
               as="form"
