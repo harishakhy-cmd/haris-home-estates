@@ -39,9 +39,20 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
       api.get('/users/online').catch(() => ({ data: [] })),
     ]).then(([usersRes, onlineRes]) => {
       const users: User[] = usersRes.data ?? [];
-      setAllUsers(users);
-      setResults(users);
-      setOnlineIds(onlineRes.data ?? []);
+      const onlineUsersList = onlineRes.data ?? [];
+      const onlineIdsList = onlineUsersList.map((u: any) => u.id);
+      setOnlineIds(onlineIdsList);
+
+      const sortedUsers = [...users].sort((a, b) => {
+        const aOnline = onlineIdsList.includes(a.id);
+        const bOnline = onlineIdsList.includes(b.id);
+        if (aOnline && !bOnline) return -1;
+        if (!aOnline && bOnline) return 1;
+        return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+      });
+
+      setAllUsers(sortedUsers);
+      setResults(sortedUsers);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -65,10 +76,20 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser }) => {
     // Confirm with server (may find users not yet loaded client-side)
     setSearching(true);
     api.get('/users/search', { params: { q: term } })
-      .then(res => setResults(res.data ?? []))
+      .then(res => {
+        const resUsers: User[] = res.data ?? [];
+        const sorted = [...resUsers].sort((a, b) => {
+          const aOnline = onlineIds.includes(a.id);
+          const bOnline = onlineIds.includes(b.id);
+          if (aOnline && !bOnline) return -1;
+          if (!aOnline && bOnline) return 1;
+          return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+        });
+        setResults(sorted);
+      })
       .catch(() => { /* keep local results on error */ })
       .finally(() => setSearching(false));
-  }, [allUsers]);
+  }, [allUsers, onlineIds]);
 
   useEffect(() => {
     const t = setTimeout(() => runSearch(query), 300);

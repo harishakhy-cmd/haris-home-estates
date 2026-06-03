@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
 import { WsJwtGuard } from '../auth/ws-jwt.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { markUserOnline, markUserOffline } from '../users/users.service';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -37,6 +38,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         sockets.delete(client.id);
         if (sockets.size === 0) {
           this.activeUsers.delete(user.sub);
+          markUserOffline(user.sub);
           this.server.emit('userOffline', { userId: user.sub });
         }
       }
@@ -53,6 +55,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.activeUsers.set(user.sub, new Set());
     }
     this.activeUsers.get(user.sub)!.add(client.id);
+    markUserOnline(user.sub);
 
     client.join(`user_${user.sub}`);
 

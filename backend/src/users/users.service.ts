@@ -92,8 +92,27 @@ export class UsersService {
     });
   }
 
-  /** Return list of currently online user IDs. */
-  online(): string[] {
-    return getOnlineUserIds();
+  /** Return list of currently online users (full objects). */
+  async online(excludeId?: string) {
+    const ids = getOnlineUserIds();
+    const filteredIds = excludeId ? ids.filter(id => id !== excludeId) : ids;
+    return this.prisma.user.findMany({
+      where: {
+        id: { in: filteredIds },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        whatsapp: true,
+        avatarUrl: true,
+        role: true,
+        location: true,
+        verified: true,
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
   }
 }

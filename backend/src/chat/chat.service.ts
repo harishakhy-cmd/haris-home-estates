@@ -44,12 +44,49 @@ export class ChatService {
     }
   }
 
-  getConversations(userId: string) {
-    return this.prisma.message.findMany({
-      where: { OR: [{ senderId: userId }, { recipientId: userId }] },
-      include: { sender: true, recipient: true, group: true },
+  async getConversations(userId: string) {
+    const messages = await this.prisma.message.findMany({
+      where: {
+        groupId: null,
+        recipientId: { not: null },
+        OR: [
+          { senderId: userId },
+          { recipientId: userId },
+        ],
+      },
+      include: {
+        sender: {
+          select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+        },
+        recipient: {
+          select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
+
+    const conversationsMap = new Map<string, any>();
+    for (const msg of messages) {
+      const otherUser = msg.senderId === userId ? msg.recipient : msg.sender;
+      if (!otherUser) continue;
+
+      if (!conversationsMap.has(otherUser.id)) {
+        conversationsMap.set(otherUser.id, {
+          id: `conv-${otherUser.id}`,
+          recipientId: otherUser.id,
+          firstName: otherUser.firstName,
+          lastName: otherUser.lastName,
+          avatarUrl: otherUser.avatarUrl,
+          lastMessage: msg.content,
+          lastMessageAt: msg.createdAt,
+          unread: 0,
+        });
+      }
+      if (msg.senderId === otherUser.id && !msg.readAt) {
+        conversationsMap.get(otherUser.id).unread += 1;
+      }
+    }
+    return Array.from(conversationsMap.values());
   }
 
   getGroups(userId: string) {
@@ -59,7 +96,7 @@ export class ChatService {
     });
   }
 
-  getMessages(userId: string, targetId: string, isGroup: boolean) {
+  async getMessages(userId: string, targetId: string, isGroup: boolean) {
     if (isGroup) {
       return this.prisma.message.findMany({
         where: { groupId: targetId },
@@ -67,6 +104,18 @@ export class ChatService {
         orderBy: { createdAt: 'asc' },
       });
     } else {
+      // Mark messages sent by targetId to userId as read
+      await this.prisma.message.updateMany({
+        where: {
+          senderId: targetId,
+          recipientId: userId,
+          readAt: null,
+        },
+        data: {
+          readAt: new Date(),
+        },
+      });
+
       return this.prisma.message.findMany({
         where: {
           OR: [

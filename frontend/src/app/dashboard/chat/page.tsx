@@ -43,6 +43,19 @@ interface Message {
   sender?: { id: string; firstName: string; lastName: string; avatarUrl?: string | null };
 }
 
+interface User {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
+  avatarUrl?: string | null;
+  role?: string;
+  location?: string | null;
+  verified?: boolean;
+}
+
 interface Conversation {
   id: string;
   recipientId: string;
@@ -155,7 +168,9 @@ export default function ChatPage() {
   const [messageInput, setMessageInput] = useState('');
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [showUserSearchModal, setShowUserSearchModal] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
+  const onlineUserIds = onlineUsers.map((u) => u.id);
+
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
@@ -257,6 +272,17 @@ useEffect(() => {
         return [group, ...prev];
       });
     });
+
+    const refreshOnline = () => {
+      api.get('/users/online')
+        .then(res => setOnlineUsers(res.data ?? []))
+        .catch(() => setOnlineUsers([]));
+    };
+
+    socket.on('userOnline', () => refreshOnline());
+    socket.on('userOffline', () => refreshOnline());
+
+
 
     /* ---- WebRTC listeners ---- */
     socket.on('webrtcOffer', async (data: { offer: RTCSessionDescriptionInit; senderId: string; callType?: string }) => {
@@ -634,6 +660,56 @@ useEffect(() => {
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {tab === 'direct' && (
             <>
+              {/* Online Users horizontal list */}
+              {onlineUsers.length > 0 && (
+                <div className="border-b border-[hsl(var(--border))] py-3">
+                  <p className="px-4 text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">
+                    Online Now ({onlineUsers.length})
+                  </p>
+                  <div className="flex gap-4 overflow-x-auto px-4 pb-1 scrollbar-none">
+                    {onlineUsers.map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => {
+                          setActiveChat({
+                            id: u.id,
+                            isGroup: false,
+                            name: `${u.firstName} ${u.lastName}`,
+                            avatarUrl: u.avatarUrl,
+                          });
+                          setShowMobileChat(true);
+                          setConversations((prev) => {
+                            if (prev.some((c) => c.recipientId === u.id)) return prev;
+                            return [
+                              {
+                                id: `conv-${u.id}`,
+                                recipientId: u.id,
+                                firstName: u.firstName,
+                                lastName: u.lastName,
+                                avatarUrl: u.avatarUrl,
+                                lastMessage: undefined,
+                                lastMessageAt: undefined,
+                                unread: 0,
+                              },
+                              ...prev,
+                            ];
+                          });
+                        }}
+                        className="flex flex-col items-center gap-1 shrink-0 group transition duration-150 active:scale-95 text-center"
+                      >
+                        <div className="relative">
+                          <Avatar src={u.avatarUrl} firstName={u.firstName} lastName={u.lastName} size={42} />
+                          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-[hsl(var(--background))]" />
+                        </div>
+                        <span className="max-w-[60px] truncate text-[10px] text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))] transition">
+                          {u.firstName}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {filteredConversations.length === 0 && (
                 <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
                   <MessageCircle className="h-10 w-10 text-[hsl(var(--muted-foreground))]/40" />
@@ -649,11 +725,13 @@ useEffect(() => {
                     activeChat?.id === conv.recipientId && 'bg-[hsl(var(--primary))]/10 border-l-2 border-[hsl(var(--primary))]',
                   )}
                 >
-                                  {/* presence indicator */}
-                <Avatar src={conv.avatarUrl} firstName={conv.firstName} lastName={conv.lastName} />
-                <span className="ml-1 flex h-2 w-2 rounded-full ring-2 ring-[hsl(var(--background))] "
-                  style={{ backgroundColor: onlineUsers.includes(conv.recipientId) ? '#22c55e' : '#ef4444' }}
-                />
+                  <div className="relative shrink-0">
+                    <Avatar src={conv.avatarUrl} firstName={conv.firstName} lastName={conv.lastName} />
+                    <span className={cn(
+                      "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[hsl(var(--background))]",
+                      onlineUserIds.includes(conv.recipientId) ? "bg-emerald-400" : "bg-gray-400"
+                    )} />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">
@@ -763,8 +841,22 @@ useEffect(() => {
               <div className="min-w-0 flex-1">
                 <h3 className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">{activeChat.name}</h3>
                 <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  <span className="text-[11px] text-[hsl(var(--muted-foreground))]">Online</span>
+                  {activeChat.isGroup ? (
+                    <>
+                      <span className="h-2 w-2 rounded-full bg-sky-400" />
+                      <span className="text-[11px] text-[hsl(var(--muted-foreground))]">Group Conversation</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className={cn(
+                        "h-2 w-2 rounded-full",
+                        onlineUserIds.includes(activeChat.id) ? "bg-emerald-400" : "bg-gray-400"
+                      )} />
+                      <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {onlineUserIds.includes(activeChat.id) ? "Online" : "Offline"}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 

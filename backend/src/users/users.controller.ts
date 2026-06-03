@@ -27,10 +27,10 @@ export class UsersController {
     return this.users.search(q ?? '', user.id);
   }
 
-  /** Returns list of currently online user IDs. */
+  /** Returns list of currently online users (full objects). */
   @Get('online')
-  online() {
-    return this.users.online();
+  online(@CurrentUser() user: any) {
+    return this.users.online(user.id);
   }
 }
 
