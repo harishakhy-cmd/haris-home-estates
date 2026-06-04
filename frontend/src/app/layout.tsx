@@ -1,9 +1,9 @@
-import type { Metadata } from 'next';
 import './globals.css';
+import type { Metadata } from 'next';
+import { ReactNode } from 'react';
 import { Providers } from './providers';
 import { BottomNav } from '@/components/layout/bottom-nav';
 import { Sidebar } from '@/components/layout/sidebar';
-
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hakhybeat.web.app';
 
@@ -14,7 +14,8 @@ export const metadata: Metadata = {
     default: 'HARIS | Housing And Rental Intelligent System',
     template: '%s | HARIS',
   },
-  description: 'HARIS is a Uganda rental marketplace for apartments, houses, hostels, offices, shops, landlords, tenants, bookings, and verified property listings.',
+  description:
+    'HARIS is a Uganda rental marketplace for apartments, houses, hostels, offices, shops, landlords, tenants, bookings, and verified property listings.',
   keywords: [
     'HARIS',
     'Housing And Rental Intelligent System',
@@ -30,16 +31,15 @@ export const metadata: Metadata = {
   authors: [{ name: 'HARIS' }],
   creator: 'HARIS',
   publisher: 'HARIS',
-  alternates: {
-    canonical: '/',
-  },
+  alternates: { canonical: '/' },
   openGraph: {
     type: 'website',
     locale: 'en_UG',
     url: '/',
     siteName: 'HARIS',
     title: 'HARIS | Housing And Rental Intelligent System',
-    description: 'Find verified rentals in Uganda across apartments, houses, hostels, offices, shops, and managed property listings.',
+    description:
+      'Find verified rentals in Uganda across apartments, houses, hostels, offices, shops, and managed property listings.',
     images: [
       {
         url: '/haris-logo.png',
@@ -52,7 +52,8 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'HARIS | Housing And Rental Intelligent System',
-    description: 'A Uganda rental marketplace for verified properties, landlords, tenants, bookings, and inquiries.',
+    description:
+      'A Uganda rental marketplace for verified properties, landlords, tenants, bookings, and inquiries.',
     images: ['/haris-logo.png'],
   },
   icons: {
@@ -75,7 +76,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
@@ -121,13 +122,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <div className="flex min-h-screen">
             <Sidebar />
-            <div className="flex-1 min-h-screen pb-16 md:pb-0">
-              {children}
-            </div>
+            <div className="flex-1 min-h-screen pb-16 md:pb-0">{children}</div>
           </div>
           <BottomNav />
         </Providers>
-
       </body>
     </html>
   );

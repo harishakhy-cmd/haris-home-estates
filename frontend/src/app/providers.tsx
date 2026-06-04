@@ -42,7 +42,11 @@ function DynamicThemeManager() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(() => new QueryClient());
-  const { token, updateUser } = useAuthStore();
+  const { token, updateUser, hydrate } = useAuthStore();
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
     const splash = document.getElementById('pwa-splash');
