@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import '../styles/chat-bubbles.css';
+
 :root {
   --background: 44 40% 97%;
   --foreground: 220 28% 12%;

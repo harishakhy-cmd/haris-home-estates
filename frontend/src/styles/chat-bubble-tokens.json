@@ -1,0 +1,134 @@
+{
+  "midnight-glass": {
+    "name":"Midnight Glass",
+    "bubbleSenderBg":"rgba(18,33,58,0.92)",
+    "bubbleReceiverBg":"rgba(11,16,32,0.72)",
+    "bubbleSenderText":"#E6F7FF",
+    "bubbleReceiverText":"#D8EFFF",
+    "bubbleBorder":"rgba(79,209,255,0.18)",
+    "bubbleRadius":"20px",
+    "bubbleOpacity":"0.92",
+    "bubbleShadow":"0 8px 20px rgba(2,6,23,0.6)"
+  },
+  "neon-cyber": {
+    "name":"Neon Cyber",
+    "bubbleSenderBg":"linear-gradient(135deg, rgba(6,6,12,0.98), rgba(10,12,20,0.9))",
+    "bubbleReceiverBg":"linear-gradient(135deg, rgba(24,6,38,0.75), rgba(36,8,54,0.72))",
+    "bubbleSenderText":"#CFFBFF",
+    "bubbleReceiverText":"#FFDBF5",
+    "bubbleBorder":"linear-gradient(90deg,#00FFF0,#FF00C8)",
+    "bubbleRadius":"18px",
+    "bubbleOpacity":"0.88",
+    "bubbleShadow":"0 10px 30px rgba(0,0,0,0.7)"
+  },
+  "aurora-purple": {
+    "name":"Aurora Purple",
+    "bubbleSenderBg":"rgba(40,18,51,0.9)",
+    "bubbleReceiverBg":"rgba(129,92,255,0.14)",
+    "bubbleSenderText":"#F4EFFF",
+    "bubbleReceiverText":"#2A0B3B",
+    "bubbleBorder":"rgba(124,77,255,0.18)",
+    "bubbleRadius":"22px",
+    "bubbleOpacity":"0.9",
+    "bubbleShadow":"0 8px 22px rgba(38,14,55,0.45)"
+  },
+  "ocean-blue": {
+    "name":"Ocean Blue",
+    "bubbleSenderBg":"rgba(9,50,74,0.9)",
+    "bubbleReceiverBg":"rgba(31,182,255,0.12)",
+    "bubbleSenderText":"#E6FBFF",
+    "bubbleReceiverText":"#022935",
+    "bubbleBorder":"rgba(31,182,255,0.18)",
+    "bubbleRadius":"20px",
+    "bubbleOpacity":"0.9",
+    "bubbleShadow":"0 8px 24px rgba(2,16,25,0.48)"
+  },
+  "arctic-white": {
+    "name":"Arctic White",
+    "bubbleSenderBg":"rgba(255,255,255,0.95)",
+    "bubbleReceiverBg":"rgba(247,248,250,0.88)",
+    "bubbleSenderText":"#0B1734",
+    "bubbleReceiverText":"#24314A",
+    "bubbleBorder":"rgba(11,116,255,0.12)",
+    "bubbleRadius":"16px",
+    "bubbleOpacity":"0.98",
+    "bubbleShadow":"0 6px 18px rgba(14,20,34,0.06)"
+  },
+  "emerald-glow": {
+    "name":"Emerald Glow",
+    "bubbleSenderBg":"rgba(11,42,28,0.94)",
+    "bubbleReceiverBg":"rgba(0,195,122,0.12)",
+    "bubbleSenderText":"#E8FFF6",
+    "bubbleReceiverText":"#012516",
+    "bubbleBorder":"rgba(0,195,122,0.16)",
+    "bubbleRadius":"20px",
+    "bubbleOpacity":"0.92",
+    "bubbleShadow":"0 10px 28px rgba(1,16,12,0.48)"
+  },
+  "sunset-orange": {
+    "name":"Sunset Orange",
+    "bubbleSenderBg":"rgba(42,15,8,0.94)",
+    "bubbleReceiverBg":"rgba(255,122,61,0.12)",
+    "bubbleSenderText":"#FFF6F0",
+    "bubbleReceiverText":"#33120A",
+    "bubbleBorder":"rgba(255,122,61,0.18)",
+    "bubbleRadius":"20px",
+    "bubbleOpacity":"0.92",
+    "bubbleShadow":"0 8px 22px rgba(30,10,6,0.48)"
+  },
+  "royal-gold": {
+    "name":"Royal Gold",
+    "bubbleSenderBg":"rgba(21,19,19,0.95)",
+    "bubbleReceiverBg":"rgba(255,209,102,0.12)",
+    "bubbleSenderText":"#FBF7F2",
+    "bubbleReceiverText":"#2B2018",
+    "bubbleBorder":"rgba(255,209,102,0.22)",
+    "bubbleRadius":"18px",
+    "bubbleOpacity":"0.95",
+    "bubbleShadow":"0 12px 30px rgba(6,4,3,0.55)"
+  },
+  "carbon-black-pro": {
+    "name":"Carbon Black Pro",
+    "bubbleSenderBg":"rgba(11,11,11,0.98)",
+    "bubbleReceiverBg":"rgba(28,28,28,0.9)",
+    "bubbleSenderText":"#E6EEF7",
+    "bubbleReceiverText":"#9AA9BF",
+    "bubbleBorder":"rgba(30,144,255,0.08)",
+    "bubbleRadius":"16px",
+    "bubbleOpacity":"0.98",
+    "bubbleShadow":"0 6px 16px rgba(0,0,0,0.7)"
+  },
+  "galaxy-space": {
+    "name":"Galaxy Space",
+    "bubbleSenderBg":"rgba(21,16,43,0.95)",
+    "bubbleReceiverBg":"rgba(58,46,110,0.14)",
+    "bubbleSenderText":"#F0EFFF",
+    "bubbleReceiverText":"#1B1430",
+    "bubbleBorder":"rgba(106,92,255,0.18)",
+    "bubbleRadius":"22px",
+    "bubbleOpacity":"0.92",
+    "bubbleShadow":"0 12px 32px rgba(8,6,22,0.56)"
+  },
+  "rose-pink": {
+    "name":"Rose Pink",
+    "bubbleSenderBg":"rgba(42,18,32,0.94)",
+    "bubbleReceiverBg":"rgba(255,110,166,0.12)",
+    "bubbleSenderText":"#FFF0F7",
+    "bubbleReceiverText":"#3B1522",
+    "bubbleBorder":"rgba(255,110,166,0.16)",
+    "bubbleRadius":"20px",
+    "bubbleOpacity":"0.92",
+    "bubbleShadow":"0 8px 20px rgba(32,12,24,0.44)"
+  },
+  "minimal-clean": {
+    "name":"Minimal Clean",
+    "bubbleSenderBg":"rgba(11,100,214,0.06)",
+    "bubbleReceiverBg":"rgba(245,246,248,1)",
+    "bubbleSenderText":"#0C1A2B",
+    "bubbleReceiverText":"#0C1A2B",
+    "bubbleBorder":"rgba(12,26,43,0.04)",
+    "bubbleRadius":"14px",
+    "bubbleOpacity":"1",
+    "bubbleShadow":"0 4px 10px rgba(12,26,43,0.04)"
+  }
+}
