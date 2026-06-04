@@ -1,23 +1,46 @@
 'use client';
 
 import { X, Palette, Type } from 'lucide-react';
-import { useSettingsStore, colorThemes, fontThemes } from '@/store/settings-store';
+import { useSettingsStore, colorThemes, defaultFontThemes, fontThemes, gradientThemes, normalizeGoogleFontName } from '@/store/settings-store';
 import { cn } from '@/lib/utils';
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export function SettingsModal() {
   const {
+    accentMode,
     primaryColor,
+    gradientColor,
     fontFamily,
     showSettingsModal,
     setThemeSettings,
     setShowSettingsModal,
     hydrateSettings,
   } = useSettingsStore();
+  const [fontSearch, setFontSearch] = useState(fontFamily);
 
   useEffect(() => {
     hydrateSettings();
   }, [hydrateSettings]);
+
+  useEffect(() => {
+    setFontSearch(fontFamily);
+  }, [fontFamily, showSettingsModal]);
+
+  const visibleFonts = useMemo(() => {
+    const term = fontSearch.trim().toLowerCase();
+    const source = term
+      ? fontThemes.filter((font) => font.name.toLowerCase().includes(term))
+      : defaultFontThemes;
+    const selected = fontThemes.find((font) => font.name === fontFamily);
+    const merged = selected ? [selected, ...source.filter((font) => font.name !== selected.name)] : source;
+    return merged.slice(0, 12);
+  }, [fontFamily, fontSearch]);
+
+  const applyFont = (value: string) => {
+    const nextFont = normalizeGoogleFontName(value) || 'Inter';
+    setFontSearch(nextFont);
+    setThemeSettings(primaryColor, nextFont, accentMode, gradientColor);
+  };
 
   if (!showSettingsModal) return null;
 
@@ -52,18 +75,41 @@ export function SettingsModal() {
           <label className="flex items-center gap-2 mb-3 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
             <Palette size={14} /> Color Accent
           </label>
+          <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-[hsl(var(--muted))]/50 p-1">
+            {(['solid', 'gradient'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setThemeSettings(primaryColor, fontFamily, mode, gradientColor)}
+                className={cn(
+                  "rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-all",
+                  accentMode === mode
+                    ? "bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-sm"
+                    : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                )}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-3 gap-3">
-            {colorThemes.map((theme) => {
-              // Custom background color based on light HSL variable
+            {(accentMode === 'solid' ? colorThemes : gradientThemes).map((theme) => {
+              const isSolidTheme = 'lightPrimary' in theme;
               const bgStyle = {
-                backgroundColor: `hsl(${theme.lightPrimary})`,
+                background: isSolidTheme
+                  ? `hsl(${theme.lightPrimary})`
+                  : `linear-gradient(135deg, hsl(${theme.lightFrom}), hsl(${theme.lightTo}))`,
               };
-              const isSelected = primaryColor === theme.name;
+              const isSelected = isSolidTheme ? primaryColor === theme.name : gradientColor === theme.name;
 
               return (
                 <button
                   key={theme.name}
-                  onClick={() => setThemeSettings(theme.name, fontFamily)}
+                  onClick={() => setThemeSettings(
+                    isSolidTheme ? theme.name : primaryColor,
+                    fontFamily,
+                    accentMode,
+                    isSolidTheme ? gradientColor : theme.name,
+                  )}
                   className={cn(
                     "flex flex-col items-center gap-2 p-3 rounded-xl border text-center transition-all duration-200",
                     isSelected
@@ -84,15 +130,32 @@ export function SettingsModal() {
           <label className="flex items-center gap-2 mb-3 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
             <Type size={14} /> Typography / Font Family
           </label>
-          <div className="space-y-2">
-            {fontThemes.map((font) => {
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 p-3">
+            <input
+              value={fontSearch}
+              onChange={(event) => {
+                const value = event.target.value;
+                setFontSearch(value);
+                const exactMatch = fontThemes.find((font) => font.name.toLowerCase() === value.trim().toLowerCase());
+                if (exactMatch) applyFont(exactMatch.name);
+              }}
+              onBlur={(event) => applyFont(event.target.value)}
+              list="haris-google-fonts"
+              placeholder="Search or type any Google Font"
+              className="h-10 w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))] focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
+            />
+            <datalist id="haris-google-fonts">
+              {fontThemes.map((font) => <option key={font.name} value={font.name} />)}
+            </datalist>
+            <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto pr-1 scrollbar-thin">
+              {visibleFonts.map((font) => {
               const isSelected = fontFamily === font.name;
               return (
                 <button
                   key={font.name}
-                  onClick={() => setThemeSettings(primaryColor, font.name)}
+                  onClick={() => applyFont(font.name)}
                   className={cn(
-                    "flex items-center justify-between w-full p-3 rounded-xl border text-left transition-all duration-200",
+                    "flex items-center justify-between w-full p-3 rounded-lg border text-left transition-all duration-200",
                     isSelected
                       ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/5 shadow-sm ring-1 ring-[hsl(var(--primary))]"
                       : "border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]/40"
@@ -104,6 +167,10 @@ export function SettingsModal() {
                 </button>
               );
             })}
+            </div>
+            <div className="mt-3 rounded-lg bg-[hsl(var(--card))] px-3 py-2 text-sm text-[hsl(var(--foreground))]" style={{ fontFamily }}>
+              {fontFamily} - The quick brown fox jumps over the lazy dog.
+            </div>
           </div>
         </div>
 

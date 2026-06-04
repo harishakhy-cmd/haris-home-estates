@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { X, Search, MessageCircle, Loader2, CheckCircle2, MapPin, Phone } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { getLocalUsers } from '@/lib/local-auth';
+import { useAuthStore } from '@/store/auth-store';
 
 type User = {
   id: string;
@@ -31,17 +33,47 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser, friend
   const [onlineIds, setOnlineIds] = useState<string[]>([]);
   const [loading, setLoading]     = useState(true);
   const [searching, setSearching] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const { user: currentUser, token, hydrate } = useAuthStore();
+
+  const emptyQueryUsers = useCallback((users: User[]) => {
+    const priorityRoles = new Set(['ADMIN', 'LANDLORD']);
+    if (friendsOnly) return users;
+    return [...users].sort((a, b) => {
+      const aPriority = priorityRoles.has((a.role ?? '').toUpperCase());
+      const bPriority = priorityRoles.has((b.role ?? '').toUpperCase());
+      if (aPriority && !bPriority) return -1;
+      if (!aPriority && bPriority) return 1;
+      return 0;
+    });
+  }, [friendsOnly]);
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  const isLocalSession = token?.startsWith('local-') ?? false;
+
+  const localDirectory = useCallback(() => {
+    return getLocalUsers().filter((item) => item.id !== currentUser?.id) as User[];
+  }, [currentUser?.id]);
 
   /* Load ALL platform users + online list on mount */
   useEffect(() => {
     setLoading(true);
-    const usersPromise = friendsOnly 
-      ? api.get('/friendships') 
-      : api.get('/users/search', { params: { q: '' } });
+    setLoadError('');
+    const usersPromise = isLocalSession
+      ? Promise.resolve({ data: localDirectory() })
+      : friendsOnly 
+        ? api.get('/friendships') 
+        : api.get('/users/search', { params: { q: '' } });
 
     Promise.all([
-      usersPromise.catch(() => ({ data: [] })),
-      api.get('/users/online').catch(() => ({ data: [] })),
+      usersPromise.catch(() => {
+        setLoadError('Could not load members from the server. Please sign in again if this keeps happening.');
+        return { data: [] };
+      }),
+      isLocalSession ? Promise.resolve({ data: [] }) : api.get('/users/online').catch(() => ({ data: [] })),
     ]).then(([usersRes, onlineRes]) => {
       const users: User[] = usersRes.data ?? [];
       const onlineUsersList = onlineRes.data ?? [];
@@ -57,16 +89,16 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser, friend
       });
 
       setAllUsers(sortedUsers);
-      setResults(sortedUsers);
+      setResults(emptyQueryUsers(sortedUsers));
     }).finally(() => setLoading(false));
-  }, [friendsOnly]);
+  }, [emptyQueryUsers, friendsOnly, isLocalSession, localDirectory]);
 
   /* Debounced live search – 300 ms */
   const runSearch = useCallback((q: string) => {
     const term = q.trim();
 
     if (!term) {
-      setResults(allUsers);
+      setResults(emptyQueryUsers(allUsers));
       return;
     }
 
@@ -80,8 +112,8 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser, friend
 
     // Confirm with server (may find users not yet loaded client-side)
     setSearching(true);
-    const searchPromise = friendsOnly
-      ? Promise.resolve({ data: local }) // already have all friends locally
+    const searchPromise = friendsOnly || isLocalSession
+      ? Promise.resolve({ data: local }) // already have all local/friend results
       : api.get('/users/search', { params: { q: term } });
       
     searchPromise
@@ -95,10 +127,13 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser, friend
           return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
         });
         setResults(sorted);
+        setLoadError('');
       })
-      .catch(() => { /* keep local results on error */ })
+      .catch(() => {
+        setLoadError('Search is offline right now. Showing the members already loaded here.');
+      })
       .finally(() => setSearching(false));
-  }, [allUsers, onlineIds, friendsOnly]);
+  }, [allUsers, emptyQueryUsers, onlineIds, friendsOnly, isLocalSession]);
 
   useEffect(() => {
     const t = setTimeout(() => runSearch(query), 300);
@@ -167,6 +202,11 @@ export const UserSearchModal: React.FC<Props> = ({ onClose, onSelectUser, friend
           {query && (
             <p className="mt-1.5 text-[11px] text-[hsl(var(--muted-foreground))]">
               {results.length} result{results.length !== 1 ? 's' : ''} for "<span className="font-medium">{query}</span>"
+            </p>
+          )}
+          {loadError && (
+            <p className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+              {loadError}
             </p>
           )}
         </div>

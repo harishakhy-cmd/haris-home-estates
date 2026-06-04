@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   MessageCircle,
   Users,
@@ -30,6 +31,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { UserSearchModal } from '@/components/layout/user-search-modal';
 import { FriendRequestsModal } from '@/components/layout/friend-requests-modal';
 import { toast } from 'sonner';
+import { getLocalUsers } from '@/lib/local-auth';
 
 
 
@@ -40,6 +42,7 @@ import { toast } from 'sonner';
 
 interface Message {
   id: string;
+  clientTempId?: string;
   senderId: string;
   recipientId?: string;
   groupId?: string;
@@ -47,6 +50,7 @@ interface Message {
   fileUrl?: string;
   fileType?: string;
   createdAt: string;
+  readAt?: string | null;
   sender?: { id: string; firstName: string; lastName: string; avatarUrl?: string | null };
 }
 
@@ -81,6 +85,8 @@ interface Group {
   lastMessageAt?: string;
   members?: { id: string; firstName: string; lastName: string; avatarUrl?: string | null }[];
 }
+
+type FriendshipUiStatus = 'NONE' | 'SELF' | 'BLOCKED' | 'PENDING_SENT' | 'PENDING_RECEIVED' | 'ACCEPTED';
 
 /* ------------------------------------------------------------------ */
 /*  Socket singleton                                                   */
@@ -127,6 +133,14 @@ function isImageFile(url?: string, type?: string) {
   return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(url);
 }
 
+function isAudioFile(type?: string) {
+  return type?.startsWith('audio') ?? false;
+}
+
+function isVideoFile(type?: string) {
+  return type?.startsWith('video') ?? false;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Avatar component                                                   */
 /* ------------------------------------------------------------------ */
@@ -153,13 +167,37 @@ function Avatar({ src, firstName, lastName, size = 40 }: { src?: string | null; 
 /*  Main page                                                          */
 /* ------------------------------------------------------------------ */
 
+function ChatLoadingFallback() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-[hsl(var(--background))]">
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))]/80 p-10 text-center shadow-2xl backdrop-blur-xl">
+        <MessageCircle className="mx-auto mb-4 h-12 w-12 text-[hsl(var(--primary))]" />
+        <p className="text-sm font-semibold text-[hsl(var(--foreground))]">Loading chat...</p>
+      </div>
+    </div>
+  );
+}
+
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<ChatLoadingFallback />}>
+      <ChatPageContent />
+    </Suspense>
+  );
+}
+
+function ChatPageContent() {
+  const searchParams = useSearchParams();
+  const requestedUserId = searchParams.get('userId');
+
   /* auth */
   const { user, token, hydrate } = useAuthStore();
   useEffect(() => { hydrate(); }, [hydrate]);
 
   /* socket ref */
   const socketRef = useRef<Socket | null>(null);
+  const activeChatRef = useRef<{ id: string; isGroup: boolean; name: string; avatarUrl?: string | null } | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* data */
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -181,9 +219,12 @@ export default function ChatPage() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('Harassment');
   const [reportDesc, setReportDesc] = useState('');
+  const [activeFriendshipStatus, setActiveFriendshipStatus] = useState<FriendshipUiStatus>('NONE');
+  const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
   
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   const onlineUserIds = onlineUsers.map((u) => u.id);
+  const [suggestedUsers, setSuggestedUsers] = useState<User[]>([]);
 
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
@@ -199,6 +240,11 @@ export default function ChatPage() {
   /* file upload */
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+    setTypingUserIds([]);
+  }, [activeChat]);
 
   /* call state */
   const [callState, setCallState] = useState<'idle' | 'calling' | 'incoming' | 'active'>('idle');
@@ -238,20 +284,35 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }, []);
 
-    useEffect(() => {
-  if (!token) return;
-  // Fetch online users list
-  api.get('/users/online')
-    .then(res => setOnlineUsers(res.data ?? []))
-    .catch(() => setOnlineUsers([]));
-    
-  api.get('/friendships/pending')
-    .then(res => setPendingRequestsCount(res.data?.length ?? 0))
-    .catch(() => setPendingRequestsCount(0));
-}, [token]);
+  useEffect(() => {
+    if (!token) return;
+    if (token.startsWith('local-')) {
+      setOnlineUsers([]);
+      setPendingRequestsCount(0);
+      setSuggestedUsers(getLocalUsers().filter((item) => item.id !== user?.id));
+      return;
+    }
+    // Fetch online users list
+    api.get('/users/online')
+      .then(res => setOnlineUsers(res.data ?? []))
+      .catch(() => setOnlineUsers([]));
+      
+    api.get('/friendships/pending')
+      .then(res => setPendingRequestsCount(res.data?.length ?? 0))
+      .catch(() => setPendingRequestsCount(0));
+
+    api.get('/users/search', { params: { q: '' } })
+      .then(res => setSuggestedUsers(res.data ?? []))
+      .catch(() => setSuggestedUsers([]));
+  }, [token, user?.id]);
 
 useEffect(() => {
   if (!token) return;
+  if (token.startsWith('local-')) {
+    setConversations([]);
+    setGroups([]);
+    return;
+  }
   fetchConversations();
   fetchGroups();
 }, [token, fetchConversations, fetchGroups]);
@@ -262,6 +323,7 @@ useEffect(() => {
 
   useEffect(() => {
     if (!token || !user) return;
+    if (token.startsWith('local-')) return;
 
     const socket = getSocket(token);
     socketRef.current = socket;
@@ -275,13 +337,60 @@ useEffect(() => {
     }
 
     socket.on('newMessage', (msg: Message) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
+      const current = activeChatRef.current;
+      const belongsToActiveChat = current && (
+        current.isGroup
+          ? msg.groupId === current.id
+          : msg.groupId == null && (
+            (msg.senderId === current.id && msg.recipientId === user.id) ||
+            (msg.senderId === user.id && msg.recipientId === current.id)
+          )
+      );
+
+      if (belongsToActiveChat) {
+        setMessages((prev) => {
+          if (msg.clientTempId) {
+            const tempIndex = prev.findIndex((m) => m.id === msg.clientTempId);
+            if (tempIndex >= 0) {
+              const next = [...prev];
+              next[tempIndex] = msg;
+              return next;
+            }
+          }
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+
+        if (!current.isGroup && msg.senderId === current.id) {
+          socket.emit('markRead', { senderId: current.id });
+        }
+      }
+
       /* refresh sidebar */
       fetchConversations();
       fetchGroups();
+    });
+
+    socket.on('typing', (event: { senderId: string; groupId?: string; recipientId?: string; isTyping: boolean }) => {
+      const current = activeChatRef.current;
+      const belongsToActiveChat = current && (
+        current.isGroup ? event.groupId === current.id : event.senderId === current.id
+      );
+      if (!belongsToActiveChat || event.senderId === user.id) return;
+      setTypingUserIds((prev) => {
+        const next = new Set(prev);
+        if (event.isTyping) next.add(event.senderId);
+        else next.delete(event.senderId);
+        return Array.from(next);
+      });
+    });
+
+    socket.on('messagesRead', (event: { readerId: string }) => {
+      const current = activeChatRef.current;
+      if (!current || current.isGroup || current.id !== event.readerId) return;
+      setMessages((prev) => prev.map((message) => (
+        message.senderId === user.id ? { ...message, readAt: new Date().toISOString() } as Message : message
+      )));
     });
 
     socket.on('groupCreated', (group: Group) => {
@@ -339,6 +448,8 @@ useEffect(() => {
 
     return () => {
       socket.off('newMessage');
+      socket.off('typing');
+      socket.off('messagesRead');
       socket.off('groupCreated');
       socket.off('webrtcOffer');
       socket.off('webrtcAnswer');
@@ -357,9 +468,25 @@ useEffect(() => {
     setLoading(true);
     api
       .get('/chat/messages', { params: { targetId: activeChat.id, isGroup: activeChat.isGroup } })
-      .then((res) => setMessages(res.data ?? []))
+      .then((res) => {
+        setMessages(res.data ?? []);
+        if (!activeChat.isGroup) {
+          socketRef.current?.emit('markRead', { senderId: activeChat.id });
+        }
+      })
       .catch(() => setMessages([]))
       .finally(() => setLoading(false));
+  }, [activeChat]);
+
+  useEffect(() => {
+    if (!activeChat || activeChat.isGroup) {
+      setActiveFriendshipStatus('NONE');
+      return;
+    }
+
+    api.get(`/friendships/status/${activeChat.id}`)
+      .then((res) => setActiveFriendshipStatus(res.data?.status ?? 'NONE'))
+      .catch(() => setActiveFriendshipStatus('NONE'));
   }, [activeChat]);
 
   /* ---------------------------------------------------------------- */
@@ -370,7 +497,8 @@ useEffect(() => {
     (content: string, fileUrl?: string, fileType?: string) => {
       const socket = socketRef.current;
       if (!socket || !activeChat) return;
-      const payload: Record<string, unknown> = { content };
+      const optimisticId = `temp-${Date.now()}`;
+      const payload: Record<string, unknown> = { content, clientTempId: optimisticId };
       if (fileUrl) {
         payload.fileUrl = fileUrl;
         payload.fileType = fileType;
@@ -380,7 +508,6 @@ useEffect(() => {
       } else {
         payload.recipientId = activeChat.id;
       }
-      const optimisticId = `temp-${Date.now()}`;
       /* optimistic append */
       const optimistic: Message = {
         id: optimisticId,
@@ -406,8 +533,29 @@ useEffect(() => {
   const handleSend = () => {
     const text = messageInput.trim();
     if (!text) return;
+    if (activeChat) {
+      socketRef.current?.emit('typing', activeChat.isGroup
+        ? { groupId: activeChat.id, isTyping: false }
+        : { recipientId: activeChat.id, isTyping: false });
+    }
     sendMessage(text);
     setMessageInput('');
+  };
+
+  const handleMessageInputChange = (value: string) => {
+    setMessageInput(value);
+    if (!activeChat) return;
+
+    socketRef.current?.emit('typing', activeChat.isGroup
+      ? { groupId: activeChat.id, isTyping: true }
+      : { recipientId: activeChat.id, isTyping: true });
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socketRef.current?.emit('typing', activeChat.isGroup
+        ? { groupId: activeChat.id, isTyping: false }
+        : { recipientId: activeChat.id, isTyping: false });
+    }, 1200);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -430,7 +578,7 @@ useEffect(() => {
       fd.append('file', file);
       const res = await api.post('/chat/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       const url: string = res.data?.url ?? res.data;
-      sendMessage(file.name, url, file.type);
+      sendMessage(res.data?.fileName ?? file.name, url, res.data?.fileType ?? file.type);
     } catch { /* ignore */ }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -462,6 +610,32 @@ useEffect(() => {
   /*  Select chat                                                      */
   /* ---------------------------------------------------------------- */
 
+  const openDirectChat = useCallback((selectedUser: User) => {
+    setActiveChat({
+      id: selectedUser.id,
+      isGroup: false,
+      name: `${selectedUser.firstName} ${selectedUser.lastName}`,
+      avatarUrl: selectedUser.avatarUrl,
+    });
+    setShowMobileChat(true);
+    setConversations((prev) => {
+      if (prev.some((c) => c.recipientId === selectedUser.id)) return prev;
+      return [
+        {
+          id: `conv-${selectedUser.id}`,
+          recipientId: selectedUser.id,
+          firstName: selectedUser.firstName,
+          lastName: selectedUser.lastName,
+          avatarUrl: selectedUser.avatarUrl,
+          lastMessage: undefined,
+          lastMessageAt: undefined,
+          unread: 0,
+        },
+        ...prev,
+      ];
+    });
+  }, []);
+
   const selectConversation = (conv: Conversation) => {
     setActiveChat({ id: conv.recipientId, isGroup: false, name: `${conv.firstName} ${conv.lastName}`, avatarUrl: conv.avatarUrl });
     setShowMobileChat(true);
@@ -471,6 +645,36 @@ useEffect(() => {
     setActiveChat({ id: group.id, isGroup: true, name: group.name });
     setShowMobileChat(true);
   };
+
+  useEffect(() => {
+    if (!token || !requestedUserId || activeChat?.id === requestedUserId) return;
+
+    const existing = conversations.find((conv) => conv.recipientId === requestedUserId);
+    if (existing) {
+      selectConversation(existing);
+      return;
+    }
+
+    const suggested = suggestedUsers.find((item) => item.id === requestedUserId);
+    if (suggested) {
+      openDirectChat(suggested);
+      return;
+    }
+
+    if (token.startsWith('local-')) {
+      const localUser = getLocalUsers().find((item) => item.id === requestedUserId);
+      if (localUser) {
+        openDirectChat(localUser);
+        return;
+      }
+      toast.error('Could not open that local chat.');
+      return;
+    }
+
+    api.get(`/users/${requestedUserId}`)
+      .then((res) => openDirectChat(res.data))
+      .catch(() => toast.error('Could not open that chat.'));
+  }, [activeChat?.id, conversations, openDirectChat, requestedUserId, suggestedUsers, token]);
 
   /* ---------------------------------------------------------------- */
   /*  WebRTC                                                           */
@@ -623,11 +827,29 @@ useEffect(() => {
   const handleAddFriend = async () => {
     if (!activeChat || activeChat.isGroup) return;
     try {
-      await api.post(`/friendships/request/${activeChat.id}`);
-      toast.success('Friend request sent!');
+      const res = await api.post(`/friendships/request/${activeChat.id}`);
+      if (res.data?.status === 'ACCEPTED') {
+        setActiveFriendshipStatus('ACCEPTED');
+        toast.success('You are now friends');
+      } else {
+        setActiveFriendshipStatus('PENDING_SENT');
+        toast.success('Friend request sent');
+      }
       setShowOptionsMenu(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to send request');
+    }
+  };
+
+  const handleAcceptActiveRequest = async () => {
+    if (!activeChat || activeChat.isGroup) return;
+    try {
+      await api.post(`/friendships/accept/${activeChat.id}`);
+      setActiveFriendshipStatus('ACCEPTED');
+      toast.success('Friend request accepted');
+      setPendingRequestsCount((count) => Math.max(0, count - 1));
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to accept request');
     }
   };
 
@@ -684,14 +906,17 @@ useEffect(() => {
       {/* ============================================================ */}
       <aside
         className={cn(
-          'flex w-full flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]/60 backdrop-blur-xl md:w-[380px] md:shrink-0',
+          'flex w-full flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]/80 backdrop-blur-xl md:w-[390px] md:shrink-0',
           showMobileChat && 'hidden md:flex',
         )}
       >
         {/* header */}
         <div className="space-y-3 border-b border-[hsl(var(--border))] px-4 pb-3 pt-5">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold tracking-tight text-[hsl(var(--foreground))]">Messages</h1>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-[hsl(var(--foreground))]">Inbox</h1>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">Chats, friends, and requests</p>
+            </div>
             <button
               onClick={() => setShowFriendRequestsModal(true)}
               className="relative flex items-center justify-center rounded-lg bg-[hsl(var(--muted))]/50 p-2 text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
@@ -737,7 +962,7 @@ useEffect(() => {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search conversations…"
+              placeholder="Search inbox"
               className="h-10 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 pl-9 pr-4 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))] transition focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary))]/20"
             />
           </div>
@@ -748,45 +973,24 @@ useEffect(() => {
           {tab === 'direct' && (
             <>
               {/* Online Users horizontal list */}
-              {onlineUsers.length > 0 && (
+              {(onlineUsers.length > 0 || suggestedUsers.length > 0) && (
                 <div className="border-b border-[hsl(var(--border))] py-3">
                   <p className="px-4 text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))] mb-2">
-                    Online Now ({onlineUsers.length})
+                    Active now
                   </p>
                   <div className="flex gap-4 overflow-x-auto px-4 pb-1 scrollbar-none">
-                    {onlineUsers.map((u) => (
+                    {(onlineUsers.length ? onlineUsers : suggestedUsers.slice(0, 8)).map((u) => (
                       <button
                         key={u.id}
-                        onClick={() => {
-                          setActiveChat({
-                            id: u.id,
-                            isGroup: false,
-                            name: `${u.firstName} ${u.lastName}`,
-                            avatarUrl: u.avatarUrl,
-                          });
-                          setShowMobileChat(true);
-                          setConversations((prev) => {
-                            if (prev.some((c) => c.recipientId === u.id)) return prev;
-                            return [
-                              {
-                                id: `conv-${u.id}`,
-                                recipientId: u.id,
-                                firstName: u.firstName,
-                                lastName: u.lastName,
-                                avatarUrl: u.avatarUrl,
-                                lastMessage: undefined,
-                                lastMessageAt: undefined,
-                                unread: 0,
-                              },
-                              ...prev,
-                            ];
-                          });
-                        }}
+                        onClick={() => openDirectChat(u)}
                         className="flex flex-col items-center gap-1 shrink-0 group transition duration-150 active:scale-95 text-center"
                       >
                         <div className="relative">
                           <Avatar src={u.avatarUrl} firstName={u.firstName} lastName={u.lastName} size={42} />
-                          <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-400 ring-2 ring-[hsl(var(--background))]" />
+                          <span className={cn(
+                            "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[hsl(var(--background))]",
+                            onlineUserIds.includes(u.id) ? "bg-emerald-400" : "bg-gray-400"
+                          )} />
                         </div>
                         <span className="max-w-[60px] truncate text-[10px] text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))] transition">
                           {u.firstName}
@@ -798,10 +1002,49 @@ useEffect(() => {
               )}
 
               {filteredConversations.length === 0 && (
-                <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-                  <MessageCircle className="h-10 w-10 text-[hsl(var(--muted-foreground))]/40" />
-                  <p className="text-sm text-[hsl(var(--muted-foreground))]">No conversations yet</p>
-                </div>
+                suggestedUsers.length > 0 && !searchQuery.trim() ? (
+                  <div className="border-b border-[hsl(var(--border))] py-3">
+                    <p className="px-4 pb-2 text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                      Suggested members
+                    </p>
+                    {suggestedUsers.slice(0, 12).map((member) => (
+                      <button
+                        key={member.id}
+                        onClick={() => openDirectChat(member)}
+                        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-all duration-150 hover:bg-[hsl(var(--muted))]/50"
+                      >
+                        <div className="relative shrink-0">
+                          <Avatar src={member.avatarUrl} firstName={member.firstName} lastName={member.lastName} />
+                          <span className={cn(
+                            "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[hsl(var(--background))]",
+                            onlineUserIds.includes(member.id) ? "bg-emerald-400" : "bg-gray-400"
+                          )} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">
+                              {member.firstName} {member.lastName}
+                            </span>
+                            {member.role && (
+                              <span className="shrink-0 rounded-full bg-[hsl(var(--primary))]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--primary))]">
+                                {member.role.charAt(0) + member.role.slice(1).toLowerCase()}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-0.5 truncate text-xs text-[hsl(var(--muted-foreground))]">
+                            {member.location || member.email || member.phone || 'Start chatting...'}
+                          </p>
+                        </div>
+                        <MessageCircle size={15} className="shrink-0 text-[hsl(var(--primary))]/50" />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+                    <MessageCircle className="h-10 w-10 text-[hsl(var(--muted-foreground))]/40" />
+                    <p className="text-sm text-[hsl(var(--muted-foreground))]">No conversations yet</p>
+                  </div>
+                )
               )}
               {filteredConversations.map((conv) => (
                 <button
@@ -942,6 +1185,18 @@ useEffect(() => {
                       <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
                         {onlineUserIds.includes(activeChat.id) ? "Online" : "Offline"}
                       </span>
+                      <span className="text-[11px] text-[hsl(var(--muted-foreground))]">·</span>
+                      <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {activeFriendshipStatus === 'ACCEPTED'
+                          ? 'Friends'
+                          : activeFriendshipStatus === 'PENDING_SENT'
+                          ? 'Request sent'
+                          : activeFriendshipStatus === 'PENDING_RECEIVED'
+                          ? 'Wants to connect'
+                          : activeFriendshipStatus === 'BLOCKED'
+                          ? 'Blocked'
+                          : 'Not friends'}
+                      </span>
                     </>
                   )}
                 </div>
@@ -952,6 +1207,7 @@ useEffect(() => {
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => startCall('audio')}
+                    disabled={activeFriendshipStatus !== 'ACCEPTED'}
                     className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]"
                     title="Audio call"
                   >
@@ -959,11 +1215,20 @@ useEffect(() => {
                   </button>
                   <button
                     onClick={() => startCall('video')}
+                    disabled={activeFriendshipStatus !== 'ACCEPTED'}
                     className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]"
                     title="Video call"
                   >
                     <Video size={18} />
                   </button>
+                  {activeFriendshipStatus === 'PENDING_RECEIVED' && (
+                    <button
+                      onClick={handleAcceptActiveRequest}
+                      className="hidden rounded-lg bg-[hsl(var(--primary))] px-3 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))] transition hover:opacity-90 sm:inline-flex"
+                    >
+                      Accept
+                    </button>
+                  )}
                   
                   <div className="relative">
                     <button
@@ -979,9 +1244,17 @@ useEffect(() => {
                         <div className="absolute right-0 top-full z-50 mt-1 w-40 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1 shadow-lg backdrop-blur-xl">
                           <button
                             onClick={handleAddFriend}
+                            disabled={activeFriendshipStatus === 'ACCEPTED' || activeFriendshipStatus === 'PENDING_SENT' || activeFriendshipStatus === 'SELF' || activeFriendshipStatus === 'BLOCKED'}
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
                           >
-                            <UserPlus size={14} /> Add Friend
+                            <UserPlus size={14} />
+                            {activeFriendshipStatus === 'ACCEPTED'
+                              ? 'Already Friends'
+                              : activeFriendshipStatus === 'PENDING_SENT'
+                              ? 'Request Sent'
+                              : activeFriendshipStatus === 'PENDING_RECEIVED'
+                              ? 'Accept Request'
+                              : 'Add Friend'}
                           </button>
                           <button
                             onClick={handleBlockUser}
@@ -1058,6 +1331,10 @@ useEffect(() => {
                                 className="max-h-52 rounded-lg object-cover"
                                 loading="lazy"
                               />
+                            ) : isAudioFile(msg.fileType) ? (
+                              <audio controls src={msg.fileUrl} className="max-w-full" />
+                            ) : isVideoFile(msg.fileType) ? (
+                              <video controls src={msg.fileUrl} className="max-h-64 max-w-full rounded-lg" />
                             ) : (
                               <a
                                 href={msg.fileUrl}
@@ -1093,20 +1370,54 @@ useEffect(() => {
                   </div>
                 );
               })}
+              {typingUserIds.length > 0 && (
+                <div className="mb-3 flex justify-start">
+                  <div className="rounded-2xl rounded-bl-md border border-[hsl(var(--border))]/50 bg-[hsl(var(--card))] px-4 py-2 text-xs text-[hsl(var(--muted-foreground))] shadow-sm">
+                    Typing...
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
             {/* input area */}
-            <div className="border-t border-[hsl(var(--border))] bg-[hsl(var(--card))]/60 px-4 py-3 backdrop-blur-xl">
-              <div className="flex items-end gap-2">
-                {/* attach */}
-                                {/* attach */}
+            <div className="border-t border-[hsl(var(--border))] bg-[hsl(var(--card))]/80 px-4 py-3 backdrop-blur-xl">
+              {!activeChat.isGroup && activeFriendshipStatus !== 'ACCEPTED' ? (
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[hsl(var(--foreground))]">
+                      {activeFriendshipStatus === 'PENDING_SENT'
+                        ? 'Friend request sent'
+                        : activeFriendshipStatus === 'PENDING_RECEIVED'
+                        ? `${activeChat.name} sent you a request`
+                        : 'Connect to start chatting'}
+                    </p>
+                    <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">Messages unlock after the request is accepted.</p>
+                  </div>
+                  {activeFriendshipStatus === 'PENDING_RECEIVED' ? (
+                    <button
+                      onClick={handleAcceptActiveRequest}
+                      className="shrink-0 rounded-xl bg-[hsl(var(--primary))] px-4 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]"
+                    >
+                      Accept
+                    </button>
+                  ) : activeFriendshipStatus === 'NONE' ? (
+                    <button
+                      onClick={handleAddFriend}
+                      className="shrink-0 rounded-xl bg-[hsl(var(--primary))] px-4 py-2 text-xs font-semibold text-[hsl(var(--primary-foreground))]"
+                    >
+                      Add
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+              <div className="flex items-end gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2 shadow-sm">
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
                   className={cn(
-                    'shrink-0 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]',
+                    'shrink-0 rounded-full p-2.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]',
                     uploading && 'animate-pulse',
                   )}
                   title="Attach file"
@@ -1128,7 +1439,7 @@ useEffect(() => {
                           fd.append('file', blob, 'voice-message.webm');
                           api.post('/chat/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => {
                             const url = res.data?.url ?? res.data;
-                            sendMessage('Voice Message', url, 'audio/webm');
+                            sendMessage(res.data?.fileName ?? 'Voice Message', url, res.data?.fileType ?? 'audio/webm');
                           }).finally(() => {
                             setRecording(false);
                             setMediaRecorder(null);
@@ -1145,35 +1456,32 @@ useEffect(() => {
                   }}
                   disabled={recording && !mediaRecorder}
                   className={cn(
-                    'shrink-0 rounded-xl p-2.5',
+                    'shrink-0 rounded-full p-2.5',
                     recording ? 'bg-red-500 text-white' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]'
                   )}
                   title={recording ? 'Stop recording' : 'Record voice message'}
                 >
                   {recording ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
-
-                <button
-                  className={cn(
-                    'shrink-0 rounded-xl p-2.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]',
-                    uploading && 'animate-pulse',
-                  )}
-                  title="Attach file"
-                >
-                  <Paperclip size={18} />
-                </button>
-
-
+                <textarea
+                  value={messageInput}
+                  onChange={(event) => handleMessageInputChange(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Send a message..."
+                  rows={1}
+                  className="max-h-28 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))]"
+                />
 
                 {/* send */}
                 <button
                   onClick={handleSend}
                   disabled={!messageInput.trim()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-md shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-lg disabled:opacity-40 disabled:shadow-none active:scale-95"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-md shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-lg disabled:opacity-40 disabled:shadow-none active:scale-95"
                 >
                   <Send size={17} />
                 </button>
               </div>
+              )}
             </div>
           </>
         )}
@@ -1455,31 +1763,7 @@ useEffect(() => {
           friendsOnly={false}
           onClose={() => setShowUserSearchModal(false)}
           onSelectUser={(selectedUser) => {
-            /* Immediately open a direct chat with this user */
-            setActiveChat({
-              id: selectedUser.id,
-              isGroup: false,
-              name: `${selectedUser.firstName} ${selectedUser.lastName}`,
-              avatarUrl: selectedUser.avatarUrl,
-            });
-            setShowMobileChat(true);
-            /* Add to conversations sidebar if not already present */
-            setConversations((prev) => {
-              if (prev.some((c) => c.recipientId === selectedUser.id)) return prev;
-              return [
-                {
-                  id: `conv-${selectedUser.id}`,
-                  recipientId: selectedUser.id,
-                  firstName: selectedUser.firstName,
-                  lastName: selectedUser.lastName,
-                  avatarUrl: selectedUser.avatarUrl,
-                  lastMessage: undefined,
-                  lastMessageAt: undefined,
-                  unread: 0,
-                },
-                ...prev,
-              ];
-            });
+            openDirectChat(selectedUser);
           }}
         />
       )}

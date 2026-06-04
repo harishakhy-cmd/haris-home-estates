@@ -8,7 +8,16 @@ export function youtubeEmbedUrl(url: string) {
   return match?.[1] ? `https://www.youtube.com/embed/${match[1]}` : url;
 }
 
+export function normalizeWhatsAppPhone(phone: string) {
+  const digits = phone.replace(/[^\d]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('00')) return digits.slice(2);
+  if (digits.startsWith('0') && digits.length >= 9) return `256${digits.slice(1)}`;
+  if (digits.startsWith('7') && digits.length === 9) return `256${digits}`;
+  return digits;
+}
+
 export function whatsappUrl(phone: string, message: string) {
-  const clean = phone.replace(/[^\d]/g, '');
+  const clean = normalizeWhatsAppPhone(phone);
   return `https://wa.me/${clean}?text=${encodeURIComponent(message)}`;
 }

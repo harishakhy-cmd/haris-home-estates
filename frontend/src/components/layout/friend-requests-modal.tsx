@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/auth-store';
+import { getLocalUsers } from '@/lib/local-auth';
 
 type PendingRequest = {
   friendshipId: string;
@@ -34,19 +35,72 @@ export const FriendRequestsModal: React.FC<Props> = ({ onClose }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
+  const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
+  const currentUserId = useAuthStore((state) => state.user?.id);
+  const token = useAuthStore((state) => state.token);
+  const isLocalSession = token?.startsWith('local-') ?? false;
 
-  // Fetch pending requests when pending tab is active
+  const localDirectory = () => getLocalUsers().filter((user) => user.id !== currentUserId);
+
+  const loadFriendshipState = async () => {
+    if (isLocalSession) {
+      setRequestedIds(new Set());
+      setFriendIds(new Set());
+      return;
+    }
+    try {
+      const [outgoingRes, friendsRes] = await Promise.all([
+        api.get('/friendships/outgoing').catch(() => ({ data: [] })),
+        api.get('/friendships').catch(() => ({ data: [] })),
+      ]);
+      setRequestedIds(new Set((outgoingRes.data ?? []).map((item: any) => item.receiver?.id).filter(Boolean)));
+      setFriendIds(new Set((friendsRes.data ?? []).map((item: any) => item.id).filter(Boolean)));
+    } catch {
+      setRequestedIds(new Set());
+      setFriendIds(new Set());
+    }
+  };
+
+  const fetchSuggestions = async () => {
+    setSearching(true);
+    setSearchError('');
+    try {
+      if (isLocalSession) {
+        setSearchResults(localDirectory());
+      } else {
+        const res = await api.get('/users/search', { params: { q: '' } });
+        setSearchResults(res.data ?? []);
+      }
+      await loadFriendshipState();
+    } catch {
+      setSearchError('Could not load members from the server. Please sign in again if this keeps happening.');
+      setSearchResults([]);
+    }
+    setSearching(false);
+  };
+
+  // Fetch pending requests or load suggestions when tabs change
   useEffect(() => {
     if (tab === 'pending') {
       fetchPending();
+    } else if (tab === 'add') {
+      fetchSuggestions();
     }
   }, [tab]);
 
   const fetchPending = async () => {
     setLoading(true);
+    if (isLocalSession) {
+      setPendingRequests([]);
+      setLoading(false);
+      return;
+    }
     try {
       const res = await api.get('/friendships/pending'); // token added via interceptor
       setPendingRequests(res.data ?? []);
+      await loadFriendshipState();
     } catch {
       toast.error('Failed to load pending requests');
     }
@@ -57,6 +111,7 @@ export const FriendRequestsModal: React.FC<Props> = ({ onClose }) => {
     try {
       await api.post(`/friendships/accept/${senderId}`);
       setPendingRequests((prev) => prev.filter((r) => r.friendshipId !== friendshipId));
+      setFriendIds((prev) => new Set(prev).add(senderId));
       toast.success('Friend request accepted');
     } catch {
       toast.error('Failed to accept request');
@@ -76,23 +131,48 @@ export const FriendRequestsModal: React.FC<Props> = ({ onClose }) => {
   const handleSearch = async (q: string) => {
     setSearchQuery(q);
     if (!q.trim()) {
-      setSearchResults([]);
+      fetchSuggestions();
       return;
     }
     setSearching(true);
+    setSearchError('');
     try {
-      const res = await api.get('/users/search', { params: { q } });
-      setSearchResults(res.data ?? []);
+      if (isLocalSession) {
+        const term = q.trim().toLowerCase();
+        setSearchResults(localDirectory().filter((user) =>
+          [user.firstName, user.lastName, user.email, user.phone]
+            .some((value) => value?.toLowerCase().includes(term)),
+        ));
+      } else {
+        const res = await api.get('/users/search', { params: { q } });
+        setSearchResults(res.data ?? []);
+      }
+      await loadFriendshipState();
     } catch {
-      // ignore errors
+      setSearchError('Search is offline right now. Try signing in again or search later.');
     }
     setSearching(false);
   };
 
   const sendRequest = async (userId: string) => {
+    if (isLocalSession) {
+      toast.error('Friend requests need a live account. Please sign in with the online server account to connect.');
+      return;
+    }
     try {
-      await api.post(`/friendships/request/${userId}`);
-      toast.success('Friend request sent!');
+      const res = await api.post(`/friendships/request/${userId}`);
+      if (res.data?.status === 'ACCEPTED') {
+        setFriendIds((prev) => new Set(prev).add(userId));
+        setRequestedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(userId);
+          return next;
+        });
+        toast.success('You are now friends');
+        return;
+      }
+      setRequestedIds((prev) => new Set(prev).add(userId));
+      toast.success('Friend request sent');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to send request');
     }
@@ -157,9 +237,17 @@ export const FriendRequestsModal: React.FC<Props> = ({ onClose }) => {
                 />
               </div>
               {searching && <div className="py-8 text-center text-sm text-[hsl(var(--muted-foreground))]"><Loader2 className="mx-auto animate-spin" /></div>}
+              {searchError && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+                  {searchError}
+                </div>
+              )}
               {!searching && searchResults.length > 0 && (
                 <div className="space-y-3">
-                  {searchResults.map((user) => (
+                  {searchResults.filter((user) => user.id !== currentUserId).map((user) => {
+                    const isFriend = friendIds.has(user.id);
+                    const isRequested = requestedIds.has(user.id);
+                    return (
                     <div key={user.id} className="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] p-3">
                       <div className="relative shrink-0">
                         {user.avatarUrl ? (
@@ -174,9 +262,20 @@ export const FriendRequestsModal: React.FC<Props> = ({ onClose }) => {
                         <p className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">{user.firstName} {user.lastName}</p>
                         <p className="truncate text-xs text-[hsl(var(--muted-foreground))]">{user.location || user.role || 'User'}</p>
                       </div>
-                      <button onClick={() => sendRequest(user.id)} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[hsl(var(--primary))]/10 px-3 py-1.5 text-xs font-semibold text-[hsl(var(--primary))] transition hover:bg-[hsl(var(--primary))]/20"><UserPlus size={14} /> Add</button>
+                      <button
+                        onClick={() => sendRequest(user.id)}
+                        disabled={isFriend || isRequested}
+                        className={cn(
+                          'flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition',
+                          isFriend || isRequested
+                            ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'
+                            : 'bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))]/20',
+                        )}
+                      >
+                        <UserPlus size={14} /> {isFriend ? 'Friends' : isRequested ? 'Sent' : 'Add'}
+                      </button>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>

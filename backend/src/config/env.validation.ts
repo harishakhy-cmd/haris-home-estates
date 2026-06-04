@@ -53,6 +53,10 @@ export class EnvironmentVariables {
 
   @IsString()
   @IsOptional()
+  FIREBASE_API_KEY?: string;
+
+  @IsString()
+  @IsOptional()
   TYPESENSE_HOST?: string;
 
   @IsString()

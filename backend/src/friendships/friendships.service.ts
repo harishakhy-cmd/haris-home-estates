@@ -196,6 +196,55 @@ export class FriendshipsService {
     }));
   }
 
+  async getOutgoingRequests(userId: string) {
+    const requests = await this.prisma.friendship.findMany({
+      where: {
+        senderId: userId,
+        status: FriendshipStatus.PENDING,
+      },
+      include: {
+        receiver: {
+          select: { id: true, firstName: true, lastName: true, email: true, phone: true, avatarUrl: true, role: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return requests.map((r) => ({
+      friendshipId: r.id,
+      createdAt: r.createdAt,
+      receiver: r.receiver,
+    }));
+  }
+
+  async getFriendshipStatus(userId: string, otherUserId: string) {
+    if (userId === otherUserId) return { status: 'SELF' };
+
+    const block = await this.prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: userId, blockedId: otherUserId },
+          { blockerId: otherUserId, blockedId: userId },
+        ],
+      },
+    });
+    if (block) return { status: 'BLOCKED' };
+
+    const friendship = await this.prisma.friendship.findFirst({
+      where: {
+        OR: [
+          { senderId: userId, receiverId: otherUserId },
+          { senderId: otherUserId, receiverId: userId },
+        ],
+      },
+    });
+
+    if (!friendship) return { status: 'NONE' };
+    if (friendship.status === FriendshipStatus.ACCEPTED) return { status: 'ACCEPTED', friendshipId: friendship.id };
+    if (friendship.senderId === userId) return { status: 'PENDING_SENT', friendshipId: friendship.id };
+    return { status: 'PENDING_RECEIVED', friendshipId: friendship.id };
+  }
+
   async getBlockedUsers(userId: string) {
     const blocks = await this.prisma.block.findMany({
       where: { blockerId: userId },
@@ -229,6 +278,18 @@ export class FriendshipsService {
       },
     });
     return !!friendship;
+  }
+
+  async areNotBlocked(userId1: string, userId2: string): Promise<boolean> {
+    const block = await this.prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: userId1, blockedId: userId2 },
+          { blockerId: userId2, blockedId: userId1 },
+        ],
+      },
+    });
+    return !block;
   }
 
   async isBlocked(blockerId: string, blockedId: string): Promise<boolean> {

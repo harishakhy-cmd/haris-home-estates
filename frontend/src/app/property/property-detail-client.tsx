@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Bath, BedDouble, CalendarDays, Heart, Loader2, MapPin, MessageSquare, Navigation, ShieldCheck } from 'lucide-react';
+import { Bath, BedDouble, CalendarDays, Heart, Loader2, MapPin, MessageSquare, Navigation, ShieldCheck, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Header } from '@/components/layout/header';
 import { PropertyCard } from '@/components/properties/property-card';
@@ -12,7 +12,7 @@ import { api } from '@/lib/api';
 import { getLocalPropertyById } from '@/lib/local-properties';
 import { fallbackProperties } from '@/lib/mock-data';
 import { money } from '@/lib/utils';
-import { googleDriveImageUrl, whatsappUrl, youtubeEmbedUrl } from '@/lib/media';
+import { googleDriveImageUrl, normalizeWhatsAppPhone, whatsappUrl, youtubeEmbedUrl } from '@/lib/media';
 import { addTenantFavorite, addTenantViewed, isTenantFavorite, removeTenantFavorite, addLocalBooking, addLocalReview, addLocalInquiry } from '@/lib/tenant-activity';
 import { useAuthStore } from '@/store/auth-store';
 import { googleMapDirectionsUrl, googleMapSearchUrl, googleMapUrl } from '@/lib/uganda-regions';
@@ -49,8 +49,10 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
     retry: false,
   });
   const image = googleDriveImageUrl(property.images?.[0]?.url ?? 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1200&q=80');
-  const landlordWhatsApp = property.landlord?.phone ?? '';
+  const landlordWhatsApp = property.landlord?.whatsapp ?? property.landlord?.phone ?? '';
+  const normalizedLandlordWhatsApp = normalizeWhatsAppPhone(landlordWhatsApp);
   const reviews = landlordReviews.data ?? [];
+  const chronologicalReviews = [...reviews].sort((a: any, b: any) => new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime());
   const averageLandlordRating = reviews.length ? (reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / reviews.length).toFixed(1) : null;
   const mapLocationParts = [
     property.address,
@@ -96,7 +98,7 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
       setNotice('Fill your name, WhatsApp/contact, and viewing date before checkout.');
       return;
     }
-    if (!landlordWhatsApp) {
+    if (!normalizedLandlordWhatsApp) {
       setNotice('This landlord has not added a WhatsApp contact yet.');
       return;
     }
@@ -111,7 +113,9 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
       bookingNote ? `Notes: ${bookingNote}` : '',
       `Property link: ${window.location.href}`,
     ].filter(Boolean).join('\n');
-    window.open(whatsappUrl(landlordWhatsApp, text), '_blank', 'noopener,noreferrer');
+    const url = whatsappUrl(normalizedLandlordWhatsApp, text);
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) window.location.href = url;
   }
 
   async function checkoutViaMobileMoney() {
@@ -289,6 +293,48 @@ export function PropertyDetailClient({ propertyId }: PropertyDetailClientProps) 
                   <p className="mt-1 text-sm text-muted-foreground">{averageLandlordRating ? `${averageLandlordRating}/5 landlord rating` : 'No landlord ratings yet'}</p>
                 </div>
               </div>
+              {landlordId ? (
+                <Button
+                  type="button"
+                  className="mt-4 w-full"
+                  onClick={() => {
+                    window.location.href = `/dashboard/chat?userId=${encodeURIComponent(landlordId)}&landlord=1`;
+                  }}
+                >
+                  <MessageSquare size={17} /> Chat with Landlord
+                </Button>
+              ) : null}
+            </Card>
+            <Card className="p-5">
+              <h2 className="font-semibold">Landlord compliments and comments</h2>
+              {chronologicalReviews.length ? (
+                <div className="mt-4 space-y-4">
+                  {chronologicalReviews.map((review: any) => (
+                    <div key={review.id} className="border-b border-border pb-4 last:border-b-0 last:pb-0">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
+                            {review.user?.firstName || 'Tenant'} {review.user?.lastName || ''}
+                          </p>
+                          {review.createdAt ? (
+                            <p className="text-xs text-muted-foreground">{new Date(review.createdAt).toLocaleDateString()}</p>
+                          ) : null}
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-primary">
+                          <Star size={14} fill="currentColor" /> {review.rating}/5
+                        </span>
+                      </div>
+                      {review.comment ? (
+                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{review.comment}</p>
+                      ) : (
+                        <p className="mt-2 text-sm text-muted-foreground">No written comment.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">No compliments or comments have been shared for this landlord yet.</p>
+              )}
             </Card>
             <Card
               as="form"

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -31,6 +31,12 @@ export class UsersController {
   @Get('online')
   online(@CurrentUser() user: any) {
     return this.users.online(user.id);
+  }
+
+  /** Get user by ID. */
+  @Get(':id')
+  getUser(@Param('id') id: string) {
+    return this.users.findById(id);
   }
 }
 

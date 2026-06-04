@@ -1,13 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { google } from 'googleapis';
 import { Readable } from 'stream';
+import { FriendshipsService } from '../friendships/friendships.service';
 
 @Injectable()
 export class ChatService {
   private drive;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(private readonly prisma: PrismaService, private readonly friendshipsService: FriendshipsService) {
     const auth = new google.auth.GoogleAuth({
       credentials: {
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -37,7 +38,7 @@ export class ChatService {
         requestBody: { role: 'reader', type: 'anyone' },
       });
 
-      return response.data.webViewLink!;
+      return `https://drive.google.com/uc?export=view&id=${response.data.id}`;
     } catch (error) {
       console.error('Google Drive Upload Error', error);
       throw new Error('Failed to upload file');
@@ -98,12 +99,20 @@ export class ChatService {
 
   async getMessages(userId: string, targetId: string, isGroup: boolean) {
     if (isGroup) {
+      const member = await this.prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId: targetId, userId } },
+      });
+      if (!member) throw new ForbiddenException('You are not a member of this group');
+
       return this.prisma.message.findMany({
         where: { groupId: targetId },
         include: { sender: true },
         orderBy: { createdAt: 'asc' },
       });
     } else {
+      const canChat = await this.friendshipsService.areNotBlocked(userId, targetId);
+      if (!canChat) throw new ForbiddenException('This conversation is blocked');
+
       // Mark messages sent by targetId to userId as read
       await this.prisma.message.updateMany({
         where: {
@@ -127,5 +136,24 @@ export class ChatService {
         orderBy: { createdAt: 'asc' },
       });
     }
+  }
+
+  async sendDirectMessage(userId: string, recipientId: string, content: string, fileUrl?: string, fileType?: string) {
+    const canChat = await this.friendshipsService.areNotBlocked(userId, recipientId);
+    if (!canChat) throw new ForbiddenException('This conversation is blocked');
+
+    return this.prisma.message.create({
+      data: {
+        senderId: userId,
+        recipientId,
+        content,
+        fileUrl,
+        fileType,
+      },
+      include: {
+        sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+        recipient: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+      },
+    });
   }
 }

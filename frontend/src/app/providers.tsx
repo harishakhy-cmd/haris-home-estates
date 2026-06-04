@@ -6,33 +6,52 @@ import { useState, useEffect } from 'react';
 import { FirebaseAnalytics } from '@/components/firebase-analytics';
 import { useAuthStore } from '@/store/auth-store';
 import { api } from '@/lib/api';
-import { useSettingsStore, colorThemes } from '@/store/settings-store';
+import { useSettingsStore, colorThemes, gradientThemes, googleFontsImport, normalizeGoogleFontName } from '@/store/settings-store';
 import { SettingsModal } from '@/components/layout/settings-modal';
 import { Toaster } from 'sonner';
 
 function DynamicThemeManager() {
-  const { primaryColor, fontFamily, hydrateSettings } = useSettingsStore();
+  const { accentMode, primaryColor, gradientColor, fontFamily, hydrateSettings } = useSettingsStore();
 
   useEffect(() => {
     hydrateSettings();
   }, [hydrateSettings]);
 
+  useEffect(() => {
+    document.documentElement.dataset.accentMode = accentMode;
+  }, [accentMode]);
+
   const activeTheme = colorThemes.find((t) => t.name === primaryColor) || colorThemes[0];
+  const activeGradient = gradientThemes.find((t) => t.name === gradientColor) || gradientThemes[0];
+  const primaryLight = accentMode === 'gradient' ? activeGradient.lightFrom : activeTheme.lightPrimary;
+  const primaryDark = accentMode === 'gradient' ? activeGradient.darkFrom : activeTheme.darkPrimary;
+  const safeFontFamily = normalizeGoogleFontName(fontFamily) || 'Inter';
 
   return (
     <style
       dangerouslySetInnerHTML={{
         __html: `
-          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+          ${googleFontsImport(safeFontFamily)}
 
           :root {
-            --primary: ${activeTheme.lightPrimary};
+            --primary: ${primaryLight};
+            --primary-gradient-from: ${activeGradient.lightFrom};
+            --primary-gradient-to: ${activeGradient.lightTo};
+            --primary-gradient: linear-gradient(135deg, hsl(var(--primary-gradient-from)), hsl(var(--primary-gradient-to)));
           }
           .dark {
-            --primary: ${activeTheme.darkPrimary};
+            --primary: ${primaryDark};
+            --primary-gradient-from: ${activeGradient.darkFrom};
+            --primary-gradient-to: ${activeGradient.darkTo};
+          }
+          :root[data-accent-mode="gradient"] .gradient-primary-bg,
+          :root[data-accent-mode="gradient"] [data-gradient-primary="true"] {
+            background-image: var(--primary-gradient);
+            background-color: hsl(var(--primary-gradient-from));
+            color: hsl(var(--primary-foreground));
           }
           body, button, input, textarea, select {
-            font-family: "${fontFamily}", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+            font-family: "${safeFontFamily}", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif !important;
           }
         `,
       }}
@@ -83,4 +102,3 @@ export function Providers({ children }: { children: React.ReactNode }) {
     </QueryClientProvider>
   );
 }
-

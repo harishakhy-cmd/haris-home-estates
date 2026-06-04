@@ -46,6 +46,16 @@ export class FriendshipsController {
     return this.friendshipsService.getPendingRequests(user.id);
   }
 
+  @Get('outgoing')
+  getOutgoingRequests(@CurrentUser() user: any) {
+    return this.friendshipsService.getOutgoingRequests(user.id);
+  }
+
+  @Get('status/:userId')
+  getFriendshipStatus(@CurrentUser() user: any, @Param('userId') otherUserId: string) {
+    return this.friendshipsService.getFriendshipStatus(user.id, otherUserId);
+  }
+
   @Get('blocked')
   getBlockedUsers(@CurrentUser() user: any) {
     return this.friendshipsService.getBlockedUsers(user.id);

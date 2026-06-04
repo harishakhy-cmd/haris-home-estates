@@ -62,6 +62,55 @@ export class AuthService {
     throw new NotImplementedException('Google registration is ready for OAuth credentials. Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and callback handling for production.');
   }
 
+  async googleLogin(idToken: string) {
+    const apiKey = process.env.FIREBASE_API_KEY;
+    if (!apiKey) {
+      throw new UnauthorizedException('Firebase integration is not configured on the server');
+    }
+
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
+
+    if (!response.ok) {
+      throw new UnauthorizedException('Invalid Firebase credentials');
+    }
+
+    const data = await response.json();
+    const firebaseUser = data?.users?.[0];
+    if (!firebaseUser) {
+      throw new UnauthorizedException('Invalid Firebase token');
+    }
+
+    const email = firebaseUser.email?.toLowerCase();
+    if (!email) {
+      throw new UnauthorizedException('Firebase account must have an email');
+    }
+
+    const displayName = firebaseUser.displayName ?? 'Haris User';
+    const [firstName, ...rest] = displayName.split(' ');
+    const lastName = rest.join(' ') || 'User';
+
+    let user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          firstName,
+          lastName,
+          avatarUrl: firebaseUser.photoUrl,
+          role: UserRole.TENANT,
+          landlordApproved: true,
+          passwordHash: await bcrypt.hash(Math.random().toString(36), 12),
+        },
+      });
+    }
+
+    return this.issueTokens(user);
+  }
+
   private async issueTokens(user: any) {
     const payload = { sub: user.id, email: user.email, phone: user.phone, role: user.role };
     return {

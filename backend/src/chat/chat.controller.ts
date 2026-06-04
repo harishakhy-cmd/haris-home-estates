@@ -27,10 +27,18 @@ export class ChatController {
     return this.chatService.getMessages(user.id, targetId, isGroup === 'true');
   }
 
+  @Post('messages')
+  sendMessage(
+    @CurrentUser() user: any,
+    @Body() body: { recipientId: string; content: string; fileUrl?: string; fileType?: string },
+  ) {
+    return this.chatService.sendDirectMessage(user.id, body.recipientId, body.content, body.fileUrl, body.fileType);
+  }
+
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadFile(@UploadedFile() file: Express.Multer.File) {
+  async uploadFile(@UploadedFile() file: any) {
     const url = await this.chatService.uploadFileToDrive(file);
-    return { url };
+    return { url, fileType: file.mimetype, fileName: file.originalname };
   }
 }

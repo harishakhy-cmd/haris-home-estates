@@ -4,7 +4,7 @@ import { paginate } from '../common/dto/pagination.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePropertyDto, PropertyFilterDto, UpdatePropertyDto } from './dto/property.dto';
 
-const include = { images: true, amenities: true, landlord: { select: { id: true, firstName: true, lastName: true, phone: true, verified: true, verificationBadge: true } }, reviews: true };
+const include = { images: true, amenities: true, landlord: { select: { id: true, firstName: true, lastName: true, phone: true, whatsapp: true, verified: true, verificationBadge: true } }, reviews: true };
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 const cleanList = (items?: string[]) => (items ?? []).map((item) => item.trim()).filter(Boolean);
 

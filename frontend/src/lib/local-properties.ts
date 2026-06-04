@@ -19,6 +19,7 @@ type LocalPropertyInput = {
     firstName: string;
     lastName: string;
     phone?: string | null;
+    whatsapp?: string | null;
     email?: string | null;
   };
 };
@@ -83,6 +84,7 @@ export function createLocalProperty(input: LocalPropertyInput) {
       firstName: input.landlord.firstName,
       lastName: input.landlord.lastName,
       phone: input.landlord.phone ?? null,
+      whatsapp: input.landlord.whatsapp ?? input.landlord.phone ?? null,
       email: input.landlord.email ?? null,
       verified: false,
       verificationBadge: false,
@@ -112,6 +114,15 @@ export function updateLocalProperty(propertyId: string, input: LocalPropertyInpu
     youtubeUrls: (input.youtubeUrls ?? []).filter(Boolean),
     amenities: (input.amenityNames ?? []).filter(Boolean).map((name) => ({ name })),
     nearbyFacilities: (input.nearbyFacilities ?? []).filter(Boolean),
+    landlord: {
+      ...(existing.landlord ?? {}),
+      id: input.landlord.id,
+      firstName: input.landlord.firstName,
+      lastName: input.landlord.lastName,
+      phone: input.landlord.phone ?? existing.landlord?.phone ?? null,
+      whatsapp: input.landlord.whatsapp ?? existing.landlord?.whatsapp ?? input.landlord.phone ?? null,
+      email: input.landlord.email ?? existing.landlord?.email ?? null,
+    },
     updatedAt: new Date().toISOString(),
   };
   saveLocalProperties(items.map((item: any) => item.id === propertyId ? updated : item));

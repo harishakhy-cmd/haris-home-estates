@@ -166,6 +166,7 @@ export default function NewListingPage() {
                   firstName: user.firstName,
                   lastName: user.lastName,
                   phone: user.phone ?? null,
+                  whatsapp: user.whatsapp ?? user.phone ?? null,
                   email: user.email ?? null,
                 },
               };

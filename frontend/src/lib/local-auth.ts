@@ -2,6 +2,7 @@ type LocalUser = {
   id: string;
   email?: string | null;
   phone?: string | null;
+  whatsapp?: string | null;
   firstName: string;
   lastName: string;
   role: 'TENANT' | 'LANDLORD' | 'ADMIN';
@@ -38,6 +39,7 @@ const seededUsers: LocalAuthUser[] = [
     id: 'local-landlord-demo',
     identifier: '+256700000001',
     phone: '+256700000001',
+    whatsapp: '+256700000001',
     password: 'Password123!',
     firstName: 'Amina',
     lastName: 'Kato',
@@ -84,13 +86,16 @@ export function localRegister(input: {
   lastName: string;
   role: 'TENANT' | 'LANDLORD';
   method: 'email' | 'phone';
+  whatsapp?: string;
 }) {
   const identifier = input.identifier.trim();
+  const whatsapp = input.whatsapp?.trim() || null;
   const user = {
     id: `local-${input.role.toLowerCase()}-${Date.now()}`,
     identifier,
     email: input.method === 'email' ? identifier : null,
     phone: input.method === 'phone' ? identifier : null,
+    whatsapp: input.role === 'LANDLORD' ? whatsapp : null,
     password: input.password,
     firstName: input.firstName || (input.role === 'LANDLORD' ? 'Landlord' : 'Tenant'),
     lastName: input.lastName || 'User',

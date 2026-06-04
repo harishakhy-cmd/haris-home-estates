@@ -26,6 +26,13 @@ export default function AuthPage() {
   const [notice, setNotice] = useState('');
   const setSession = useAuthStore((state) => state.setSession);
 
+  function afterAuthPath(nextUser: { role: string }) {
+    const params = new URLSearchParams(window.location.search);
+    const redirect = params.get('redirect');
+    if (redirect?.startsWith('/')) return redirect;
+    return nextUser.role === 'TENANT' ? '/dashboard/tenant' : nextUser.role === 'LANDLORD' ? '/dashboard/landlord' : '/admin';
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('role') === 'LANDLORD') {
@@ -45,13 +52,13 @@ export default function AuthPage() {
       const { data } = await api.post('/auth/login', { identifier, password });
       setSession(data.accessToken, data.user);
       setNotice(`Signed in as ${data.user.firstName}.`);
-      router.push(data.user.role === 'TENANT' ? '/dashboard/tenant' : data.user.role === 'LANDLORD' ? '/dashboard/landlord' : '/admin');
+      router.push(afterAuthPath(data.user));
     } catch {
       const local = await localLogin(identifier, password);
       if (local) {
         setSession(local.accessToken, local.user);
         setNotice(`Signed in locally as ${local.user.firstName}.`);
-        router.push(local.user.role === 'TENANT' ? '/dashboard/tenant' : local.user.role === 'LANDLORD' ? '/dashboard/landlord' : '/admin');
+        router.push(afterAuthPath(local.user));
         return;
       }
       setNotice(role === 'LANDLORD'
@@ -82,12 +89,12 @@ export default function AuthPage() {
       const { data } = await api.post('/auth/register', payload);
       setSession(data.accessToken, data.user);
       setNotice(role === 'LANDLORD' ? 'Landlord account created. Awaiting admin approval.' : 'Tenant account created.');
-      router.push(role === 'TENANT' ? '/dashboard/tenant' : '/dashboard/landlord');
+      router.push(afterAuthPath(data.user));
     } catch {
-      const local = localRegister({ identifier, password, firstName, lastName, role, method });
+      const local = localRegister({ identifier, password, firstName, lastName, role, method, whatsapp });
       setSession(local.accessToken, local.user);
       setNotice(role === 'LANDLORD' ? 'Landlord account created. Awaiting admin approval.' : 'Tenant account created locally.');
-      router.push(role === 'LANDLORD' ? '/dashboard/landlord' : '/dashboard/tenant');
+      router.push(afterAuthPath(local.user));
     }
   }
 
@@ -96,19 +103,11 @@ export default function AuthPage() {
       const credential = await signInWithPopup(firebaseAuth, googleProvider);
       const firebaseUser = credential.user;
       const token = await firebaseUser.getIdToken();
-      const [firstName = 'Google', ...rest] = (firebaseUser.displayName ?? 'Google User').split(' ');
-      const user = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email,
-        firstName,
-        lastName: rest.join(' ') || 'User',
-        role: role === 'ADMIN' ? 'TENANT' : role,
-        landlordApproved: role !== 'LANDLORD',
-        avatarUrl: firebaseUser.photoURL,
-      };
-      setSession(token, user);
+
+      const res = await api.post('/auth/google-login', { idToken: token });
+      setSession(res.data.accessToken, res.data.user);
       setNotice(role === 'LANDLORD' ? 'Google landlord session created. Awaiting admin approval.' : 'Google tenant session created.');
-      router.push(role === 'LANDLORD' ? '/dashboard/landlord' : '/dashboard/tenant');
+      router.push(afterAuthPath(res.data.user));
     } catch {
       setNotice('Google sign-in could not complete. Check Firebase authorized domains and popup settings.');
     }

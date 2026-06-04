@@ -78,7 +78,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('sendMessage')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { recipientId?: string; groupId?: string; content: string; fileUrl?: string; fileType?: string; callId?: string },
+    @MessageBody() payload: { recipientId?: string; groupId?: string; content: string; fileUrl?: string; fileType?: string; callId?: string; clientTempId?: string },
   ) {
     const user = client.data.user;
 
@@ -89,9 +89,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
       if (!member) return { error: 'Not a member of this group' };
     } else if (payload.recipientId) {
-      const canChat = await this.friendshipsService.areFriendsAndNotBlocked(user.sub, payload.recipientId);
+      const canChat = await this.friendshipsService.areNotBlocked(user.sub, payload.recipientId);
       if (!canChat) {
-        return { error: 'You can only message confirmed friends who have not blocked you' };
+        return { error: 'This conversation is blocked' };
       }
     }
 
@@ -110,13 +110,53 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       },
     });
 
+    const realtimeMessage = { ...message, clientTempId: payload.clientTempId };
+
     if (payload.groupId) {
-      this.server.to(`group_${payload.groupId}`).emit('newMessage', message);
+      this.server.to(`group_${payload.groupId}`).emit('newMessage', realtimeMessage);
     } else if (payload.recipientId) {
-      this.server.to(`user_${payload.recipientId}`).emit('newMessage', message);
-      client.emit('newMessage', message); // send back to sender
+      this.server.to(`user_${payload.recipientId}`).emit('newMessage', realtimeMessage);
+      client.emit('newMessage', realtimeMessage); // send back to sender
     }
     return { success: true, messageId: message.id };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('typing')
+  async handleTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { recipientId?: string; groupId?: string; isTyping: boolean },
+  ) {
+    const senderId = client.data.user.sub;
+    if (payload.groupId) {
+      const member = await this.prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId: payload.groupId, userId: senderId } },
+      });
+      if (!member) return;
+      client.to(`group_${payload.groupId}`).emit('typing', { senderId, groupId: payload.groupId, isTyping: payload.isTyping });
+      return;
+    }
+
+    if (!payload.recipientId) return;
+    const canChat = await this.friendshipsService.areNotBlocked(senderId, payload.recipientId);
+    if (!canChat) return;
+    this.server.to(`user_${payload.recipientId}`).emit('typing', { senderId, recipientId: payload.recipientId, isTyping: payload.isTyping });
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('markRead')
+  async handleMarkRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { senderId?: string; groupId?: string },
+  ) {
+    const userId = client.data.user.sub;
+    if (payload.senderId) {
+      await this.prisma.message.updateMany({
+        where: { senderId: payload.senderId, recipientId: userId, readAt: null },
+        data: { readAt: new Date() },
+      });
+      this.server.to(`user_${payload.senderId}`).emit('messagesRead', { readerId: userId });
+    }
   }
 
   @UseGuards(WsJwtGuard)
@@ -158,28 +198,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // WebRTC Signaling
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcOffer')
-  async handleWebRtcOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp: any; isVideo: boolean }) {
+  async handleWebRtcOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp?: any; offer?: any; isVideo?: boolean; callType?: string }) {
     const callerId = client.data.user.sub;
     const canCall = await this.friendshipsService.areFriendsAndNotBlocked(callerId, payload.targetId);
     if (!canCall) return;
 
     this.server.to(`user_${payload.targetId}`).emit('webrtcOffer', {
       callerId,
-      sdp: payload.sdp,
-      isVideo: payload.isVideo,
+      senderId: callerId,
+      sdp: payload.sdp ?? payload.offer,
+      offer: payload.offer ?? payload.sdp,
+      isVideo: payload.isVideo ?? payload.callType === 'video',
+      callType: payload.callType ?? (payload.isVideo ? 'video' : 'audio'),
     });
   }
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcAnswer')
-  async handleWebRtcAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp: any }) {
+  async handleWebRtcAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp?: any; answer?: any }) {
     const responderId = client.data.user.sub;
     const canCall = await this.friendshipsService.areFriendsAndNotBlocked(responderId, payload.targetId);
     if (!canCall) return;
 
     this.server.to(`user_${payload.targetId}`).emit('webrtcAnswer', {
       responderId,
-      sdp: payload.sdp,
+      sdp: payload.sdp ?? payload.answer,
+      answer: payload.answer ?? payload.sdp,
     });
   }
 
