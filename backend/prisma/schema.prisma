@@ -129,6 +129,8 @@ model User {
   reportsReceived     Report[]     @relation("ReportedRelations")
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  lastSeen        DateTime?
+  statusText      String?
 
   @@index([role])
   @@index([verified])
@@ -292,6 +294,12 @@ model Message {
   fileType    String?
   callId      String?
   readAt      DateTime?
+  editedAt    DateTime?
+  editedContent String?
+  deletedAt   DateTime?
+  viewOnce    Boolean  @default(false)
+  reactions   Json?
+  selfDestructed Boolean @default(false)
   sender      User       @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
   recipient   User?      @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
   group       ChatGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)

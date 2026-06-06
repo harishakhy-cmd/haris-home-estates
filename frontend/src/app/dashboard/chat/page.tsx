@@ -26,9 +26,12 @@ import {
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { api } from '@/lib/api';
+import { useSettingsStore } from '@/store/settings-store';
+import { STICKERS } from '@/lib/stickers';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth-store';
 import { UserSearchModal } from '@/components/layout/user-search-modal';
+import ThemeSelector from '@/components/chat/ThemeSelector';
 import { FriendRequestsModal } from '@/components/layout/friend-requests-modal';
 import { toast } from 'sonner';
 import { getLocalUsers } from '@/lib/local-auth';
@@ -52,6 +55,7 @@ interface Message {
   createdAt: string;
   readAt?: string | null;
   sender?: { id: string; firstName: string; lastName: string; avatarUrl?: string | null };
+  reactions?: { userId: string; emoji: string }[];
 }
 
 interface User {
@@ -139,6 +143,29 @@ function isAudioFile(type?: string) {
 
 function isVideoFile(type?: string) {
   return type?.startsWith('video') ?? false;
+}
+
+function getSupportedAudioMimeType() {
+  if (typeof MediaRecorder === 'undefined' || !('isTypeSupported' in MediaRecorder)) return '';
+  return [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/mpeg',
+  ].find((type) => MediaRecorder.isTypeSupported(type)) ?? '';
+}
+
+function getMediaErrorMessage(err: any, action: string) {
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    return `${action} requires HTTPS on mobile browsers.`;
+  }
+  if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+    return 'Please allow microphone and camera access, then try again.';
+  }
+  if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+    return 'No microphone or camera was found on this device.';
+  }
+  return err?.message || `Failed to ${action.toLowerCase()}.`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -229,6 +256,8 @@ function ChatPageContent() {
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 
 
@@ -240,6 +269,19 @@ function ChatPageContent() {
   /* file upload */
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [attachment, setAttachment] = useState<{ url: string; fileType?: string; fileName?: string } | null>(null);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [stickerQuery, setStickerQuery] = useState('');
+  const [giphyResults, setGiphyResults] = useState<any[]>([]);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<User[]>([]);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileUser, setProfileUser] = useState<User | null>(null);
+  const bubbleShape = useSettingsStore((s) => s.bubbleShape);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [viewOnce, setViewOnce] = useState(false);
+  const [newListingsCount, setNewListingsCount] = useState(0);
+  const [appBadgeCount, setAppBadgeCount] = useState(0);
 
   useEffect(() => {
     activeChatRef.current = activeChat;
@@ -306,6 +348,17 @@ function ChatPageContent() {
       .catch(() => setSuggestedUsers([]));
   }, [token, user?.id]);
 
+    // Update app badge and document title for unread counts and new listings
+    useEffect(() => {
+      const totalUnread = (conversations?.reduce((s, c) => s + (c.unread ?? 0), 0) ?? 0) + newListingsCount;
+      setAppBadgeCount(totalUnread);
+      if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
+        try { (navigator as any).setAppBadge(totalUnread); } catch { /* ignore */ }
+      } else {
+        if (totalUnread > 0) document.title = `(${totalUnread}) Haris`; else document.title = 'Haris';
+      }
+    }, [conversations, newListingsCount]);
+
 useEffect(() => {
   if (!token) return;
   if (token.startsWith('local-')) {
@@ -369,6 +422,24 @@ useEffect(() => {
       /* refresh sidebar */
       fetchConversations();
       fetchGroups();
+    });
+
+    socket.on('messageReacted', (event: { messageId: string; reactions: any[] }) => {
+      setMessages((prev) => prev.map(m => m.id === event.messageId ? { ...m, reactions: event.reactions } as any : m));
+    });
+
+    socket.on('messageDeleted', (event: { messageId: string }) => {
+      setMessages((prev) => prev.filter(m => m.id !== event.messageId));
+      fetchConversations();
+    });
+
+    socket.on('messageEdited', (msg: Message) => {
+      setMessages((prev) => prev.map(m => m.id === msg.id ? msg : m));
+    });
+
+    socket.on('newProperty', (data: any) => {
+      setNewListingsCount((c) => c + 1);
+      setAppBadgeCount((c) => c + 1);
     });
 
     socket.on('typing', (event: { senderId: string; groupId?: string; recipientId?: string; isTyping: boolean }) => {
@@ -496,9 +567,12 @@ useEffect(() => {
   const sendMessage = useCallback(
     (content: string, fileUrl?: string, fileType?: string) => {
       const socket = socketRef.current;
-      if (!socket || !activeChat) return;
+      if (!socket || !activeChat) {
+        toast.error('Chat connection is not ready yet.');
+        return;
+      }
       const optimisticId = `temp-${Date.now()}`;
-      const payload: Record<string, unknown> = { content, clientTempId: optimisticId };
+      const payload: Record<string, unknown> = { content, clientTempId: optimisticId, viewOnce };
       if (fileUrl) {
         payload.fileUrl = fileUrl;
         payload.fileType = fileType;
@@ -526,19 +600,64 @@ useEffect(() => {
           setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         }
       });
+      // reset viewOnce toggle after sending
+      setViewOnce(false);
     },
-    [activeChat, user?.id],
+    [activeChat, user?.id, viewOnce],
   );
+
+  const deleteMessage = useCallback(async (messageId: string) => {
+    if (!messageId || messageId.startsWith('temp-')) return;
+    const previousMessages = messages;
+    setMessages((prev) => prev.filter((message) => message.id !== messageId));
+    setSelectedMessageId(null);
+
+    const deleteViaApi = async (errorMessage?: string) => {
+      try {
+        await api.delete(`/chat/messages/${messageId}`);
+      } catch (err: any) {
+        setMessages(previousMessages);
+        toast.error(errorMessage || err?.response?.data?.message || 'Failed to delete message');
+      }
+    };
+
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      await deleteViaApi();
+      return;
+    }
+
+    const fallbackTimer = setTimeout(() => {
+      deleteViaApi();
+    }, 1500);
+
+    socket.emit('deleteMessage', { messageId }, async (response: any) => {
+      clearTimeout(fallbackTimer);
+      if (response?.success) return;
+      await deleteViaApi(response?.error);
+    });
+  }, [messages]);
 
   const handleSend = () => {
     const text = messageInput.trim();
-    if (!text) return;
+    if (!text && !attachment) return;
     if (activeChat) {
       socketRef.current?.emit('typing', activeChat.isGroup
         ? { groupId: activeChat.id, isTyping: false }
         : { recipientId: activeChat.id, isTyping: false });
     }
-    sendMessage(text);
+    if (editingMessageId) {
+      socketRef.current?.emit('editMessage', { messageId: editingMessageId, content: text });
+      setEditingMessageId(null);
+      setMessageInput('');
+      return;
+    }
+    if (attachment) {
+      sendMessage(text, attachment.url, attachment.fileType);
+      setAttachment(null);
+    } else {
+      sendMessage(text);
+    }
     setMessageInput('');
   };
 
@@ -578,10 +697,43 @@ useEffect(() => {
       fd.append('file', file);
       const res = await api.post('/chat/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       const url: string = res.data?.url ?? res.data;
-      sendMessage(res.data?.fileName ?? file.name, url, res.data?.fileType ?? file.type);
-    } catch { /* ignore */ }
+      // show attachment preview and let user add a caption before sending
+      setAttachment({ url, fileType: res.data?.fileType ?? file.type, fileName: res.data?.fileName ?? file.name });
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to upload media');
+    }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  useEffect(() => {
+    if (!stickerQuery) {
+      setGiphyResults([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.get(`/chat/gifs/search`, { params: { q: stickerQuery } });
+        setGiphyResults(res.data?.data || []);
+      } catch (err) {
+        setGiphyResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [stickerQuery]);
+
+  const beginMessagePress = (messageId: string) => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      setSelectedMessageId(messageId);
+    }, 450);
+  };
+
+  const cancelMessagePress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
   };
 
   /* ---------------------------------------------------------------- */
@@ -681,10 +833,16 @@ useEffect(() => {
   /* ---------------------------------------------------------------- */
 
   const ICE_SERVERS: RTCIceServer[] = [
+    // STUN servers (only candidate discovery, no relay)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    // Free TURN servers (for mobile/NAT traversal)
+    { urls: ['turn:openrelay.metered.ca:80'], username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: ['turn:openrelay.metered.ca:443'], username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: ['turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
   ];
-
   const cleanupCall = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
@@ -705,21 +863,38 @@ useEffect(() => {
       const socket = socketRef.current;
       if (!socket) return null;
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      
+      pc.onicegatheringstatechange = () => {
+        console.log('[WebRTC] ICE gathering state:', pc.iceGatheringState);
+      };
+      
       pc.onicecandidate = (e) => {
         if (e.candidate) {
+          console.log('[WebRTC] ICE candidate:', e.candidate.candidate);
           socket.emit('webrtcIceCandidate', { targetId, candidate: e.candidate.toJSON() });
         }
       };
+      
       pc.ontrack = (e) => {
+        console.log('[WebRTC] Received track:', e.track.kind);
         if (remoteVideoRef.current && e.streams[0]) {
           remoteVideoRef.current.srcObject = e.streams[0];
         }
       };
+      
       pc.oniceconnectionstatechange = () => {
+        console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
         if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+          console.error('[WebRTC] Connection failed, cleaning up');
+          toast.error('Call connection failed');
           cleanupCall();
         }
       };
+      
+      pc.onconnectionstatechange = () => {
+        console.log('[WebRTC] Connection state:', pc.connectionState);
+      };
+      
       peerConnectionRef.current = pc;
       return pc;
     },
@@ -729,6 +904,14 @@ useEffect(() => {
   const startCall = useCallback(
     async (type: 'audio' | 'video') => {
       if (!activeChat || activeChat.isGroup) return;
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        toast.error('Calls are not supported in this browser.');
+        return;
+      }
+      if (typeof window !== 'undefined' && !window.isSecureContext && !window.location.hostname.includes('localhost')) {
+        toast.error('Calls require HTTPS on mobile browsers.');
+        return;
+      }
       setCallType(type);
       setCallTargetId(activeChat.id);
       setCallTargetName(activeChat.name);
@@ -736,24 +919,37 @@ useEffect(() => {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: type === 'video',
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: type === 'video'
+            ? { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 540 } }
+            : false,
         });
+        console.log('[WebRTC] Got local stream, tracks:', stream.getTracks().map(t => t.kind));
         localStreamRef.current = stream;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
         const pc = createPeerConnection(activeChat.id);
-        if (!pc) return;
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        if (!pc) {
+          toast.error('Failed to create peer connection');
+          cleanupCall();
+          return;
+        }
+        stream.getTracks().forEach((track) => {
+          console.log('[WebRTC] Adding track:', track.kind);
+          pc.addTrack(track, stream);
+        });
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        console.log('[WebRTC] Sending offer');
         socketRef.current?.emit('webrtcOffer', {
           targetId: activeChat.id,
           offer: pc.localDescription,
           callType: type,
         });
-      } catch {
+      } catch (err: any) {
+        console.error('[WebRTC] Start call error:', err);
+        toast.error(getMediaErrorMessage(err, `Start ${type} call`));
         cleanupCall();
       }
     },
@@ -763,26 +959,50 @@ useEffect(() => {
   const acceptCall = useCallback(async () => {
     const pending = pendingOfferRef.current;
     if (!pending) return;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      toast.error('Calls are not supported in this browser.');
+      cleanupCall();
+      return;
+    }
+    if (typeof window !== 'undefined' && !window.isSecureContext && !window.location.hostname.includes('localhost')) {
+      toast.error('Calls require HTTPS on mobile browsers.');
+      cleanupCall();
+      return;
+    }
     setCallState('active');
 
     try {
+      console.log('[WebRTC] Accepting call, requesting media');
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: callType === 'video',
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: callType === 'video'
+          ? { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 540 } }
+          : false,
       });
+      console.log('[WebRTC] Got local stream for answer, tracks:', stream.getTracks().map(t => t.kind));
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
       const pc = createPeerConnection(pending.senderId);
-      if (!pc) return;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      if (!pc) {
+        toast.error('Failed to create peer connection');
+        cleanupCall();
+        return;
+      }
+      stream.getTracks().forEach((track) => {
+        console.log('[WebRTC] Adding track for answer:', track.kind);
+        pc.addTrack(track, stream);
+      });
 
       await pc.setRemoteDescription(new RTCSessionDescription(pending.offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      console.log('[WebRTC] Sending answer');
       socketRef.current?.emit('webrtcAnswer', { targetId: pending.senderId, answer: pc.localDescription });
       pendingOfferRef.current = null;
-    } catch {
+    } catch (err: any) {
+      console.error('[WebRTC] Accept call error:', err);
+      toast.error(getMediaErrorMessage(err, 'Accept call'));
       cleanupCall();
     }
   }, [callType, createPeerConnection, cleanupCall]);
@@ -853,6 +1073,74 @@ useEffect(() => {
     }
   };
 
+  const handleVoiceRecordToggle = async () => {
+    if (recording) {
+      mediaRecorder?.stop();
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      toast.error('Microphone access is required for voice messages.');
+      return;
+    }
+    
+    if (typeof MediaRecorder === 'undefined') {
+      toast.error('Voice messages are not supported in this browser.');
+      return;
+    }
+    
+    if (typeof window !== 'undefined' && !window.isSecureContext && !window.location.hostname.includes('localhost')) {
+      toast.error('Voice messages require HTTPS on mobile browsers.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      const mimeType = getSupportedAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const type = recorder.mimeType || mimeType || 'audio/webm';
+        const extension = type.includes('mp4') ? 'm4a' : type.includes('mpeg') ? 'mp3' : 'webm';
+        const blob = new Blob(chunks, { type });
+        stream.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        setMediaRecorder(null);
+
+        if (!blob.size) {
+          toast.error('No audio was recorded.');
+          return;
+        }
+
+        const fd = new FormData();
+        fd.append('file', blob, `voice-message.${extension}`);
+        setUploading(true);
+        try {
+          const res = await api.post('/chat/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+          sendMessage('Voice message', res.data?.url ?? res.data, res.data?.fileType ?? type);
+          toast.success('Voice message sent');
+        } catch (err: any) {
+          toast.error(err?.response?.data?.message || 'Failed to send voice message');
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setRecording(true);
+    } catch (err: any) {
+      toast.error(getMediaErrorMessage(err, 'Record voice message'));
+    }
+  };
+
   const submitReport = async () => {
     if (!activeChat || activeChat.isGroup) return;
     try {
@@ -917,6 +1205,7 @@ useEffect(() => {
               <h1 className="text-xl font-bold tracking-tight text-[hsl(var(--foreground))]">Inbox</h1>
               <p className="text-xs text-[hsl(var(--muted-foreground))]">Chats, friends, and requests</p>
             </div>
+            <div className="flex items-center gap-2">
             <button
               onClick={() => setShowFriendRequestsModal(true)}
               className="relative flex items-center justify-center rounded-lg bg-[hsl(var(--muted))]/50 p-2 text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
@@ -928,6 +1217,14 @@ useEffect(() => {
                 </span>
               )}
             </button>
+            <button
+              onClick={async () => { setShowBlockedModal(true); try { const res = await api.get('/friendships/blocked'); setBlockedUsers(res.data ?? []); } catch {} }}
+              className="relative flex items-center justify-center rounded-lg bg-[hsl(var(--muted))]/50 p-2 text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
+              title="Blocked users"
+            >
+              <Ban size={18} />
+            </button>
+            </div>
           </div>
 
           {/* tabs */}
@@ -1139,7 +1436,7 @@ useEffect(() => {
       {/* ============================================================ */}
       <main
         className={cn(
-          'flex flex-1 flex-col bg-[hsl(var(--background))]',
+          'flex flex-1 flex-col min-w-0 bg-[hsl(var(--background))]',
           !showMobileChat && 'hidden md:flex',
         )}
       >
@@ -1166,7 +1463,16 @@ useEffect(() => {
                 <ArrowLeft size={20} />
               </button>
 
-              <Avatar src={activeChat.avatarUrl} firstName={activeChat.name.split(' ')[0]} lastName={activeChat.name.split(' ')[1]} />
+              <button onClick={async () => {
+                if (!activeChat || activeChat.isGroup) return;
+                try {
+                  const res = await api.get(`/users/${activeChat.id}`);
+                  setProfileUser(res.data);
+                  setShowProfileModal(true);
+                } catch { /* ignore */ }
+              }} className="rounded-full">
+                <Avatar src={activeChat.avatarUrl} firstName={activeChat.name.split(' ')[0]} lastName={activeChat.name.split(' ')[1]} />
+              </button>
 
               <div className="min-w-0 flex-1">
                 <h3 className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">{activeChat.name}</h3>
@@ -1183,7 +1489,13 @@ useEffect(() => {
                         onlineUserIds.includes(activeChat.id) ? "bg-emerald-400" : "bg-gray-400"
                       )} />
                       <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
-                        {onlineUserIds.includes(activeChat.id) ? "Online" : "Offline"}
+                        {onlineUserIds.includes(activeChat.id) ? 'Online' : (
+                          (() => {
+                            const u = suggestedUsers.find(s => s.id === activeChat.id) || onlineUsers.find(s => s.id === activeChat.id);
+                            if (u && (u as any).lastSeen) return `Last seen ${formatTime((u as any).lastSeen)}`;
+                            return 'Offline';
+                          })()
+                        )}
                       </span>
                       <span className="text-[11px] text-[hsl(var(--muted-foreground))]">·</span>
                       <span className="text-[11px] text-[hsl(var(--muted-foreground))]">
@@ -1208,7 +1520,7 @@ useEffect(() => {
                   <button
                     onClick={() => startCall('audio')}
                     disabled={activeFriendshipStatus !== 'ACCEPTED'}
-                    className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]"
+                    className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))] disabled:cursor-not-allowed disabled:opacity-40"
                     title="Audio call"
                   >
                     <Phone size={18} />
@@ -1216,7 +1528,7 @@ useEffect(() => {
                   <button
                     onClick={() => startCall('video')}
                     disabled={activeFriendshipStatus !== 'ACCEPTED'}
-                    className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]"
+                    className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))] disabled:cursor-not-allowed disabled:opacity-40"
                     title="Video call"
                   >
                     <Video size={18} />
@@ -1230,6 +1542,10 @@ useEffect(() => {
                     </button>
                   )}
                   
+                  <div className="ml-2 hidden sm:block">
+                    <ThemeSelector />
+                  </div>
+
                   <div className="relative">
                     <button
                       onClick={() => setShowOptionsMenu(!showOptionsMenu)}
@@ -1262,6 +1578,22 @@ useEffect(() => {
                           >
                             <Ban size={14} /> Block User
                           </button>
+                           <button
+                             onClick={() => {
+                               if (confirm("Delete this conversation? This will remove it from your inbox.")) {
+                                 api.delete(`/chat/conversations/${activeChat.id}`).then(() => {
+                                   toast.success("Conversation deleted");
+                                   setConversations(prev => prev.filter(c => c.recipientId !== activeChat.id));
+                                   setActiveChat(null);
+                                   setShowMobileChat(false);
+                                   setShowOptionsMenu(false);
+                                 }).catch(() => toast.error("Failed to delete conversation"));
+                               }
+                             }}
+                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-500 transition hover:bg-red-500/10"
+                           >
+                             <X size={14} /> Delete Chat
+                           </button>
                           <button
                             onClick={() => { setShowReportModal(true); setShowOptionsMenu(false); }}
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-[hsl(var(--foreground))] transition hover:bg-[hsl(var(--muted))]"
@@ -1293,8 +1625,21 @@ useEffect(() => {
 
               {messages.map((msg) => {
                 const isMine = msg.senderId === user.id;
+                const isSelected = selectedMessageId === msg.id;
+                const bubbleBase = bubbleShape === 'pill' ? 'rounded-full' : bubbleShape === 'square' ? 'rounded-md' : bubbleShape === 'asym' ? 'rounded-tl-2xl rounded-tr-2xl' : 'rounded-2xl';
                 return (
-                  <div key={msg.id} className={cn('mb-3 flex items-end gap-2', isMine ? 'justify-end' : 'justify-start')}>
+                  <div
+                    key={msg.id}
+                    className={cn('mb-3 flex items-end gap-2', isMine ? 'justify-end' : 'justify-start')}
+                    onPointerDown={() => beginMessagePress(msg.id)}
+                    onPointerUp={cancelMessagePress}
+                    onPointerLeave={cancelMessagePress}
+                    onPointerCancel={cancelMessagePress}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setSelectedMessageId(msg.id);
+                    }}
+                  >
                     {/* sender avatar (group, not mine) */}
                     {!isMine && activeChat.isGroup && (
                       <Avatar
@@ -1305,7 +1650,7 @@ useEffect(() => {
                       />
                     )}
 
-                    <div className={cn('max-w-[75%] md:max-w-[55%]')}>
+                    <div className={cn('min-w-0 max-w-[75%] md:max-w-[55%]')}>
                       {/* sender name in group */}
                       {!isMine && activeChat.isGroup && msg.sender && (
                         <p className="mb-0.5 ml-1 text-[11px] font-medium text-[hsl(var(--muted-foreground))]">
@@ -1315,7 +1660,7 @@ useEffect(() => {
 
                       <div
                         className={cn(
-                          'rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm transition-all',
+                          `${bubbleBase} px-4 py-2.5 text-sm leading-relaxed shadow-sm transition-all`,
                           isMine
                             ? 'bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--primary))]/80 text-[hsl(var(--primary-foreground))] rounded-br-md'
                             : 'bg-[hsl(var(--card))] text-[hsl(var(--card-foreground))] border border-[hsl(var(--border))]/50 rounded-bl-md',
@@ -1323,7 +1668,7 @@ useEffect(() => {
                       >
                         {/* file attachment */}
                         {msg.fileUrl && (
-                          <div className="mb-2">
+                          <div className="mb-2 chat-media">
                             {isImageFile(msg.fileUrl, msg.fileType) ? (
                               <img
                                 src={msg.fileUrl}
@@ -1365,6 +1710,41 @@ useEffect(() => {
                         >
                           {formatTime(msg.createdAt)}
                         </p>
+                      </div>
+
+                      {/* reactions & actions toolbar */}
+                      <div className={cn('mt-1 flex items-center gap-2 text-xs', !isSelected && !msg.reactions?.length && 'hidden')}>
+                        {/* show reactions */}
+                        {(msg as any).reactions && Array.isArray((msg as any).reactions) && (
+                          <div className="flex items-center gap-1">
+                            {((msg as any).reactions as any[]).slice(0,5).map((r, idx) => (
+                              <span key={idx} className="rounded-full bg-[hsl(var(--muted))]/40 px-2 py-0.5">{r.emoji}</span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* quick react buttons - only show on long press */}
+                        {isSelected && (
+                        <div className="flex items-center gap-1 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 py-1 shadow-sm">
+                          {['👍','❤️','😂','🔥','😮'].map(e => (
+                            <button key={e} onClick={() => { socketRef.current?.emit('reactMessage', { messageId: msg.id, emoji: e }); }} className="rounded px-1 hover:bg-[hsl(var(--muted))]/30">{e}</button>
+                          ))}
+                        </div>
+                        )}
+
+                        {/* edit / delete actions for own messages */}
+                        {isMine && isSelected && (
+                          <div className="ml-auto flex items-center gap-1">
+                            <button onClick={() => {
+                              // allow edit only within 10s
+                              const created = new Date(msg.createdAt).getTime();
+                              if (Date.now() - created > 10000) { toast.error('Edit window expired'); return; }
+                              setEditingMessageId(msg.id);
+                              setMessageInput(msg.content);
+                            }} className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">Edit</button>
+                            <button onClick={() => { if (confirm('Delete this message for everyone?')) { deleteMessage(msg.id); } }} className="text-red-500 hover:opacity-80">Delete</button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1411,76 +1791,115 @@ useEffect(() => {
                   ) : null}
                 </div>
               ) : (
-              <div className="flex items-end gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2 shadow-sm">
-                <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className={cn(
-                    'shrink-0 rounded-full p-2.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]',
-                    uploading && 'animate-pulse',
-                  )}
-                  title="Attach file"
-                >
-                  <Paperclip size={18} />
-                </button>
-                {/* voice recorder */}
-                <button
-                  onClick={() => {
-                    if (!recording) {
-                      // start recording
-                      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                        const mr = new MediaRecorder(stream);
-                        const chunks: Blob[] = [];
-                        mr.ondataavailable = e => chunks.push(e.data);
-                        mr.onstop = () => {
-                          const blob = new Blob(chunks, { type: 'audio/webm' });
-                          const fd = new FormData();
-                          fd.append('file', blob, 'voice-message.webm');
-                          api.post('/chat/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => {
-                            const url = res.data?.url ?? res.data;
-                            sendMessage(res.data?.fileName ?? 'Voice Message', url, res.data?.fileType ?? 'audio/webm');
-                          }).finally(() => {
-                            setRecording(false);
-                            setMediaRecorder(null);
-                          });
-                        };
-                        mr.start();
-                        setMediaRecorder(mr);
-                        setRecording(true);
-                      });
-                    } else {
-                      // stop recording
-                      mediaRecorder?.stop();
-                    }
-                  }}
-                  disabled={recording && !mediaRecorder}
-                  className={cn(
-                    'shrink-0 rounded-full p-2.5',
-                    recording ? 'bg-red-500 text-white' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]'
-                  )}
-                  title={recording ? 'Stop recording' : 'Record voice message'}
-                >
-                  {recording ? <MicOff size={18} /> : <Mic size={18} />}
-                </button>
-                <textarea
-                  value={messageInput}
-                  onChange={(event) => handleMessageInputChange(event.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Send a message..."
-                  rows={1}
-                  className="max-h-28 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))]"
-                />
+                <div className="relative flex items-end gap-2 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2 shadow-sm">
+                  <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className={cn(
+                        'shrink-0 rounded-full p-2.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]',
+                        uploading && 'animate-pulse',
+                      )}
+                      title="Attach file"
+                    >
+                      <Paperclip size={18} />
+                    </button>
 
-                {/* send */}
-                <button
-                  onClick={handleSend}
-                  disabled={!messageInput.trim()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-md shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-lg disabled:opacity-40 disabled:shadow-none active:scale-95"
-                >
-                  <Send size={17} />
-                </button>
-              </div>
+                    <button
+                      onClick={() => setShowStickerPicker((v) => !v)}
+                      className="shrink-0 rounded-full p-2.5 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]/60"
+                      title="Stickers"
+                    >
+                      <Plus size={18} />
+                    </button>
+                    {showStickerPicker && (
+                      <div className="absolute bottom-20 right-6 left-auto z-50 w-80 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2 shadow-lg">
+                        <div className="mb-2 flex items-center gap-2">
+                          <input value={stickerQuery} onChange={(e) => setStickerQuery(e.target.value)} placeholder="Search GIFs..." className="flex-1 rounded-md border px-2 py-1 text-sm" />
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-2 max-h-64 overflow-auto">
+                          {giphyResults && giphyResults.length > 0 ? (
+                            giphyResults.map((g: any) => (
+                              <button key={g.id} onClick={() => { sendMessage('', g.images.fixed_width.url, 'image/gif'); setShowStickerPicker(false); }} className="rounded p-0.5">
+                                <img src={g.images.fixed_width.url} alt="gif" className="h-20 w-full object-cover rounded" />
+                              </button>
+                            ))
+                          ) : (
+                            STICKERS.map((s) => (
+                              <button key={s} onClick={() => { sendMessage('', s, 'image/png'); setShowStickerPicker(false); }} className="rounded p-0.5">
+                                <img src={s} alt="sticker" className="h-12 w-12 object-cover rounded" />
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* voice recorder */}
+                  <button
+                    onClick={handleVoiceRecordToggle}
+                    disabled={recording && !mediaRecorder}
+                    className={cn('shrink-0 rounded-full p-2.5', recording ? 'bg-red-500 text-white' : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]/60 hover:text-[hsl(var(--foreground))]')}
+                    title={recording ? 'Stop recording' : 'Record voice message'}
+                  >
+                    {recording ? <MicOff size={18} /> : <Mic size={18} />}
+                  </button>
+
+                  <div className="flex-1">
+                    {attachment ? (
+                      <div className="mb-2 flex items-start gap-3 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2">
+                        <div className="shrink-0">
+                          {isImageFile(attachment.url, attachment.fileType) ? (
+                            <img src={attachment.url} className="h-20 w-20 rounded-md object-cover" alt="preview" />
+                          ) : isAudioFile(attachment.fileType) ? (
+                            <audio controls src={attachment.url} className="h-10" />
+                          ) : isVideoFile(attachment.fileType) ? (
+                            <video controls src={attachment.url} className="h-20 w-28 rounded-md object-cover" />
+                          ) : (
+                            <a href={attachment.url} target="_blank" rel="noreferrer" className="text-sm underline">{attachment.fileName}</a>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <textarea
+                            value={messageInput}
+                            onChange={(e) => handleMessageInputChange(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Add a caption..."
+                            rows={1}
+                            className="max-h-28 min-h-10 w-full resize-none bg-transparent px-2 py-2.5 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))]"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <textarea
+                        value={messageInput}
+                        onChange={(e) => handleMessageInputChange(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="Send a message..."
+                        rows={1}
+                        className="max-h-28 min-h-10 w-full resize-none bg-transparent px-2 py-2.5 text-sm text-[hsl(var(--foreground))] outline-none placeholder:text-[hsl(var(--muted-foreground))]"
+                      />
+                    )}
+
+                    {/* send */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
+                        <input type="checkbox" checked={viewOnce} onChange={(e) => setViewOnce(e.target.checked)} className="accent-[hsl(var(--primary))]" />
+                        View once
+                      </label>
+                      <button
+                        onClick={handleSend}
+                        disabled={!messageInput.trim() && !attachment}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-md shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-lg disabled:opacity-40 disabled:shadow-none active:scale-95"
+                      >
+                        <Send size={17} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </>
@@ -1626,7 +2045,7 @@ useEffect(() => {
                   playsInline
                   muted
                   className={cn(
-                    'absolute bottom-4 right-4 h-32 w-24 rounded-xl object-cover shadow-lg ring-2 ring-[hsl(var(--border))]',
+                    'absolute bottom-4 right-4 h-20 w-16 sm:h-32 sm:w-24 rounded-xl object-cover shadow-lg ring-2 ring-[hsl(var(--border))]',
                     callType === 'audio' && 'hidden',
                   )}
                 />
@@ -1702,6 +2121,14 @@ useEffect(() => {
           scrollbar-width: thin;
           scrollbar-color: hsl(var(--border)) transparent;
         }
+        /* Ensure media and embedded elements scale within chat containers */
+        .chat-media img, .chat-media video, .chat-media audio {
+          max-width: 100%;
+          height: auto;
+          display: block;
+        }
+        /* Prevent flex children from causing horizontal overflow */
+        .min-w-0 { min-width: 0; }
       `}</style>
 
       {/* ============================================================ */}
@@ -1756,6 +2183,67 @@ useEffect(() => {
       )}
 
       {/* ============================================================ */}
+      {/*  PROFILE MODAL                                                 */}
+      {/* ============================================================ */}
+      {showProfileModal && profileUser && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowProfileModal(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="mx-4 w-full max-w-sm rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-[hsl(var(--foreground))]">{profileUser.firstName} {profileUser.lastName}</h3>
+              <button onClick={() => setShowProfileModal(false)} className="rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex flex-col items-center gap-4">
+              {profileUser.avatarUrl ? <img src={profileUser.avatarUrl} alt="avatar" className="h-48 w-48 rounded-full object-cover" /> : (
+                <div className="h-48 w-48 rounded-full bg-[hsl(var(--primary))]/10 flex items-center justify-center text-3xl font-bold">{initials(profileUser.firstName, profileUser.lastName)}</div>
+              )}
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">{profileUser.email}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/*  BLOCKED USERS MODAL                                          */}
+      {/* ============================================================ */}
+      {showBlockedModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowBlockedModal(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="mx-4 w-full max-w-md rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-[hsl(var(--foreground))]">Blocked Users</h3>
+              <button onClick={() => setShowBlockedModal(false)} className="rounded-lg p-1.5 text-[hsl(var(--muted-foreground))] transition hover:bg-[hsl(var(--muted))]/60">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mb-4 max-h-72 overflow-y-auto">
+              {blockedUsers.length === 0 && <p className="text-sm text-[hsl(var(--muted-foreground))]">No blocked users.</p>}
+              {blockedUsers.map((b) => (
+                <div key={b.id} className="flex items-center justify-between gap-3 py-2">
+                  <div className="flex items-center gap-3">
+                    <Avatar src={b.avatarUrl} firstName={b.firstName} lastName={b.lastName} />
+                    <div>
+                      <div className="text-sm font-medium text-[hsl(var(--foreground))]">{b.firstName} {b.lastName}</div>
+                      <div className="text-xs text-[hsl(var(--muted-foreground))]">{b.email}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <button onClick={async () => {
+                      try {
+                        await api.delete(`/friendships/block/${b.id}`);
+                        setBlockedUsers((prev) => prev.filter((x) => x.id !== b.id));
+                        toast.success('User unblocked');
+                      } catch { toast.error('Failed to unblock user'); }
+                    }} className="rounded-lg bg-[hsl(var(--primary))] px-3 py-1 text-sm text-[hsl(var(--primary-foreground))]">Unblock</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
       {/*  USER SEARCH MODAL – "New Chat"                               */}
       {/* ============================================================ */}
       {showUserSearchModal && (
@@ -1770,3 +2258,4 @@ useEffect(() => {
     </div>
   );
 }
+

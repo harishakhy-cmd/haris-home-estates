@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -19,6 +20,14 @@ export class UsersController {
   @Patch('me')
   updateMe(@CurrentUser() user: any, @Body() dto: any) {
     return this.users.update(user.id, dto);
+  }
+
+  @Post('me/avatar')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadAvatar(@CurrentUser() user: any, @UploadedFile() file: any) {
+    if (!file) throw new Error('No file provided');
+    const avatarUrl = await this.users.uploadAvatar(file);
+    return this.users.update(user.id, { avatarUrl });
   }
 
   /** Search platform members by name or email (used by chat "New Chat" modal). */

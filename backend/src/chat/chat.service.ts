@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { google } from 'googleapis';
 import { Readable } from 'stream';
@@ -7,6 +7,14 @@ import { FriendshipsService } from '../friendships/friendships.service';
 @Injectable()
 export class ChatService {
   private drive;
+  private readonly fallbackGifs = [
+    'https://media.giphy.com/media/3o7TKzP7z1m2FrF5yM/giphy.gif',
+    'https://media.giphy.com/media/l0HlHFRbmaZtBRhXG/giphy.gif',
+    'https://media.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif',
+    'https://media.giphy.com/media/26u4cqiYI30juCOGY/giphy.gif',
+    'https://media.giphy.com/media/3o6Zt481isNVuQI1l6/giphy.gif',
+    'https://media.giphy.com/media/111ebonMs90YLu/giphy.gif',
+  ];
 
   constructor(private readonly prisma: PrismaService, private readonly friendshipsService: FriendshipsService) {
     const auth = new google.auth.GoogleAuth({
@@ -20,7 +28,9 @@ export class ChatService {
   }
 
   async uploadFileToDrive(file: Express.Multer.File): Promise<string> {
-    if (!process.env.GOOGLE_CLIENT_EMAIL) return 'https://placehold.co/600x400.png?text=Mock+File';
+    if (!process.env.GOOGLE_CLIENT_EMAIL) {
+      return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    }
     try {
       const bufferStream = new Readable();
       bufferStream.push(file.buffer);
@@ -43,6 +53,55 @@ export class ChatService {
       console.error('Google Drive Upload Error', error);
       throw new Error('Failed to upload file');
     }
+  }
+
+  async searchGiphy(query: string) {
+    if (!query || query.trim().length === 0) {
+      return { data: [] };
+    }
+    
+    const apiKey = process.env.GIPHY_API_KEY;
+    if (!apiKey) {
+      console.warn('GIPHY_API_KEY not set - using fallback stickers');
+      return this.getFallbackGifs(query);
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
+      const res = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(query)}&limit=24&rating=pg-13`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        console.error('GIPHY API error:', res.status, res.statusText);
+        return this.getFallbackGifs(query);
+      }
+      const json = await res.json();
+      if (!json.data?.length) {
+        console.warn('GIPHY returned no results for query:', query);
+        return this.getFallbackGifs(query);
+      }
+      return { data: json.data || [] };
+    } catch (error) {
+      console.error('GIPHY search error:', error instanceof Error ? error.message : String(error));
+      return this.getFallbackGifs(query);
+    }
+  }
+
+  private getFallbackGifs(query: string) {
+    return {
+      data: this.fallbackGifs.map((url, index) => ({
+        id: `fallback-${index}-${query}`,
+        title: query,
+        images: {
+          fixed_width: { url },
+          original: { url },
+        },
+      })),
+    };
   }
 
   async getConversations(userId: string) {
@@ -155,5 +214,27 @@ export class ChatService {
         recipient: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
       },
     });
+  }
+
+  async deleteConversation(userId: string, conversationUserId: string) {
+    // Mark all messages in this conversation as deleted for the current user
+    await this.prisma.message.deleteMany({
+      where: {
+        OR: [
+          { senderId: userId, recipientId: conversationUserId },
+          { senderId: conversationUserId, recipientId: userId },
+        ],
+      },
+    });
+    return { success: true };
+  }
+
+  async deleteMessage(userId: string, messageId: string) {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) throw new NotFoundException('Message not found');
+    if (message.senderId !== userId) throw new ForbiddenException('You can only delete your own messages');
+    
+    await this.prisma.message.delete({ where: { id: messageId } });
+    return { success: true };
   }
 }

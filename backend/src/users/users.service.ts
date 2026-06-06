@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FriendshipStatus } from '@prisma/client';
+import { google } from 'googleapis';
+import { Readable } from 'stream';
 
 /* In-memory online presence store ----------------------------------- */
 const onlineUserIds = new Set<string>();
@@ -17,6 +19,8 @@ const SELECT_PUBLIC = {
   phone: true,
   whatsapp: true,
   avatarUrl: true,
+  lastSeen: true,
+  statusText: true,
   momoNumber: true,
   momoProvider: true,
   bankName: true,
@@ -34,7 +38,44 @@ const SELECT_PUBLIC = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private drive;
+
+  constructor(private readonly prisma: PrismaService) {
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      },
+      scopes: ['https://www.googleapis.com/auth/drive.file'],
+    });
+    this.drive = google.drive({ version: 'v3', auth });
+  }
+
+  async uploadAvatar(file: Express.Multer.File): Promise<string> {
+    if (!process.env.GOOGLE_CLIENT_EMAIL) return 'https://placehold.co/400x400.png?text=Avatar';
+    try {
+      const bufferStream = new Readable();
+      bufferStream.push(file.buffer);
+      bufferStream.push(null);
+
+      const response = await this.drive.files.create({
+        requestBody: { name: `avatar-${Date.now()}-${file.originalname}` },
+        media: { mimeType: file.mimetype, body: bufferStream },
+        fields: 'id, webViewLink',
+      });
+      
+      // Make it public
+      await this.drive.permissions.create({
+        fileId: response.data.id!,
+        requestBody: { role: 'reader', type: 'anyone' },
+      });
+
+      return `https://drive.google.com/uc?export=view&id=${response.data.id}`;
+    } catch (error) {
+      console.error('Google Drive Avatar Upload Error', error);
+      throw new Error('Failed to upload avatar');
+    }
+  }
 
   async findById(id: string) {
     const user = await this.prisma.user.findUnique({

@@ -171,7 +171,9 @@ type SettingsState = {
   gradientColor: string;
   fontFamily: string;
   showSettingsModal: boolean;
+  bubbleShape: string;
   setThemeSettings: (primaryColor: string, fontFamily: string, accentMode?: 'solid' | 'gradient', gradientColor?: string) => void;
+  setBubbleShape: (shape: string) => void;
   setShowSettingsModal: (show: boolean) => void;
   hydrateSettings: () => void;
 };
@@ -189,6 +191,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     localStorage.setItem('haris_font_family', fontFamily);
     set({ accentMode, primaryColor, gradientColor, fontFamily });
   },
+  // bubble shape: rounded-2xl | pill | square | asym
+  // persisted for user preference
+  bubbleShape: 'rounded-2xl',
+  setBubbleShape: (shape: string) => {
+    localStorage.setItem('haris_bubble_shape', shape);
+    set({ bubbleShape: shape });
+  },
   setShowSettingsModal: (showSettingsModal) => set({ showSettingsModal }),
   hydrateSettings: () => {
     if (typeof window === 'undefined') return;
@@ -196,6 +205,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     const primaryColor = localStorage.getItem('haris_primary_color') ?? 'teal';
     const gradientColor = localStorage.getItem('haris_gradient_color') ?? 'teal-sky';
     const fontFamily = localStorage.getItem('haris_font_family') ?? 'Inter';
+    const bubbleShape = localStorage.getItem('haris_bubble_shape') ?? 'rounded-2xl';
     set({ accentMode, primaryColor, gradientColor, fontFamily });
+    set({ bubbleShape });
   },
 }));

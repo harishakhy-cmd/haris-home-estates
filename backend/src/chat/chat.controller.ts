@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -35,10 +35,26 @@ export class ChatController {
     return this.chatService.sendDirectMessage(user.id, body.recipientId, body.content, body.fileUrl, body.fileType);
   }
 
+  @Delete('messages/:id')
+  deleteMessage(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.chatService.deleteMessage(user.id, id);
+  }
+
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async uploadFile(@UploadedFile() file: any) {
+    if (!file) throw new Error('No file provided');
     const url = await this.chatService.uploadFileToDrive(file);
     return { url, fileType: file.mimetype, fileName: file.originalname };
+  }
+
+  @Get('gifs/search')
+  searchGifs(@Query('q') q: string, @CurrentUser() user: any) {
+    return this.chatService.searchGiphy(q ?? '');
+  }
+
+  @Delete('conversations/:id')
+  deleteConversation(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.chatService.deleteConversation(user.id, id);
   }
 }

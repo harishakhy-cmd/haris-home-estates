@@ -43,6 +43,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (sockets.size === 0) {
           this.activeUsers.delete(user.sub);
           markUserOffline(user.sub);
+          // persist lastSeen
+          try { this.prisma.user.update({ where: { id: user.sub }, data: { lastSeen: new Date() } }); } catch { /* ignore */ }
           this.server.emit('userOffline', { userId: user.sub });
         }
       }
@@ -78,7 +80,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('sendMessage')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { recipientId?: string; groupId?: string; content: string; fileUrl?: string; fileType?: string; callId?: string; clientTempId?: string },
+    @MessageBody() payload: { recipientId?: string; groupId?: string; content: string; fileUrl?: string; fileType?: string; callId?: string; clientTempId?: string; viewOnce?: boolean },
   ) {
     const user = client.data.user;
 
@@ -104,6 +106,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         fileUrl: payload.fileUrl,
         fileType: payload.fileType,
         callId: payload.callId,
+        viewOnce: payload.viewOnce ?? false,
       },
       include: {
         sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
@@ -119,6 +122,57 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('newMessage', realtimeMessage); // send back to sender
     }
     return { success: true, messageId: message.id };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('reactMessage')
+  async handleReactMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: string; emoji: string }) {
+    const userId = client.data.user.sub;
+    // append reaction
+    const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
+    if (!msg) return { error: 'Message not found' };
+    const existing = msg.reactions ?? [];
+    const next = Array.isArray(existing) ? [...existing, { userId, emoji: payload.emoji }] : [{ userId, emoji: payload.emoji }];
+    await this.prisma.message.update({ where: { id: payload.messageId }, data: { reactions: next } });
+    this.server.emit('messageReacted', { messageId: payload.messageId, reactions: next });
+    return { success: true };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('deleteMessage')
+  async handleDeleteMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: string }) {
+    const userId = client.data.user.sub;
+    const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
+    if (!msg) return { error: 'Message not found' };
+    if (msg.senderId !== userId) return { error: 'Not allowed' };
+    await this.prisma.message.update({ where: { id: payload.messageId }, data: { deletedAt: new Date() } });
+    // notify involved parties
+    if (msg.groupId) this.server.to(`group_${msg.groupId}`).emit('messageDeleted', { messageId: payload.messageId });
+    else if (msg.recipientId) {
+      this.server.to(`user_${msg.recipientId}`).emit('messageDeleted', { messageId: payload.messageId });
+      client.emit('messageDeleted', { messageId: payload.messageId });
+    }
+    return { success: true };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('editMessage')
+  async handleEditMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: string; content: string }) {
+    const userId = client.data.user.sub;
+    const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
+    if (!msg) return { error: 'Message not found' };
+    if (msg.senderId !== userId) return { error: 'Not allowed' };
+    const created = msg.createdAt;
+    const tenSeconds = 10000;
+    if (new Date().getTime() - created.getTime() > tenSeconds) return { error: 'Edit window expired' };
+    const edited = await this.prisma.message.update({ where: { id: payload.messageId }, data: { content: payload.content, editedAt: new Date(), editedContent: payload.content } });
+    // broadcast edit
+    if (edited.groupId) this.server.to(`group_${edited.groupId}`).emit('messageEdited', edited);
+    else if (edited.recipientId) {
+      this.server.to(`user_${edited.recipientId}`).emit('messageEdited', edited);
+      client.emit('messageEdited', edited);
+    }
+    return { success: true };
   }
 
   @UseGuards(WsJwtGuard)
@@ -151,10 +205,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const userId = client.data.user.sub;
     if (payload.senderId) {
+      const now = new Date();
       await this.prisma.message.updateMany({
         where: { senderId: payload.senderId, recipientId: userId, readAt: null },
-        data: { readAt: new Date() },
+        data: { readAt: now },
       });
+      // find view-once messages and mark deleted after read
+      const viewOnceMsgs = await this.prisma.message.findMany({ where: { senderId: payload.senderId, recipientId: userId, viewOnce: true, selfDestructed: false }, select: { id: true } });
+      if (viewOnceMsgs.length) {
+        await this.prisma.message.updateMany({ where: { id: { in: viewOnceMsgs.map(m => m.id) } }, data: { selfDestructed: true, deletedAt: now } });
+        viewOnceMsgs.forEach(m => this.server.to(`user_${payload.senderId}`).emit('messageDeleted', { messageId: m.id }));
+      }
       this.server.to(`user_${payload.senderId}`).emit('messagesRead', { readerId: userId });
     }
   }

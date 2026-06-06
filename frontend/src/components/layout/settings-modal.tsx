@@ -16,6 +16,7 @@ export function SettingsModal() {
     setShowSettingsModal,
     hydrateSettings,
   } = useSettingsStore();
+  const { bubbleShape, setBubbleShape } = useSettingsStore();
   const [fontSearch, setFontSearch] = useState(fontFamily);
 
   useEffect(() => {
@@ -175,6 +176,31 @@ export function SettingsModal() {
         </div>
 
         {/* Action Button */}
+        <div className="mb-4">
+          <label className="flex items-center gap-2 mb-3 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">Bubble Shape</label>
+          <div className="flex gap-2">
+            {[
+              { key: 'rounded-2xl', label: 'Rounded' },
+              { key: 'pill', label: 'Pill' },
+              { key: 'square', label: 'Square' },
+              { key: 'asym', label: 'Asym' },
+            ].map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setBubbleShape(opt.key)}
+                className={cn(
+                  'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-all',
+                  bubbleShape === opt.key
+                    ? 'bg-[hsl(var(--card))] text-[hsl(var(--foreground))] shadow-sm'
+                    : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <button
           onClick={() => setShowSettingsModal(false)}
           className="w-full h-11 rounded-xl bg-[hsl(var(--primary))] text-sm font-semibold text-[hsl(var(--primary-foreground))] shadow-lg shadow-[hsl(var(--primary))]/25 transition-all duration-200 hover:shadow-xl active:scale-[0.98]"
