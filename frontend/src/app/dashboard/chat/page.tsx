@@ -2022,7 +2022,7 @@ useEffect(() => {
                   autoPlay
                   playsInline
                   className={cn(
-                    'h-full w-full object-cover',
+                    'h-full w-full object-contain',
                     callType === 'audio' && 'hidden',
                   )}
                 />
