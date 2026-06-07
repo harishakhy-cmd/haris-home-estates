@@ -13,9 +13,11 @@ import { useAuthStore } from '@/store/auth-store';
 import { getTenantFavorites, getTenantViewed, getLocalBookings, getLocalInquiries } from '@/lib/tenant-activity';
 import { startDGatewayPayment } from '@/lib/payments';
 import { getLocalInvoicesForUser, localInvoiceEmailUrl, localInvoiceWhatsAppUrl, markLocalInvoicePaid } from '@/lib/local-invoices';
+import { useDashboard } from '@/contexts/DashboardContext';
 
 export default function TenantDashboard() {
   const { user, token, hydrate, logout } = useAuthStore();
+  const { state: dashboardState } = useDashboard();
   const [localFavorites, setLocalFavorites] = useState<any[]>([]);
   const [viewedProperties, setViewedProperties] = useState<any[]>([]);
   const [paymentNotice, setPaymentNotice] = useState('');
@@ -63,13 +65,22 @@ export default function TenantDashboard() {
     });
     return Array.from(byId.values());
   }, [favorites.data, localFavorites]);
+
+  // Combine API bookings with dashboard real-time updates
+  const allBookings =
+    dashboardState.bookings.length > 0
+      ? dashboardState.bookings.filter((b: any) => b.tenantId === user?.id)
+      : bookings.data?.length
+        ? bookings.data
+        : localBookingsState;
+
   const visibleInvoices = invoices.data?.length ? invoices.data : localInvoices;
-  const visibleBookings = bookings.data?.length ? bookings.data : localBookingsState;
+  const visibleBookings = allBookings;
   const visibleInquiries = inquiries.data?.length ? inquiries.data : localInquiriesState;
   const stats = [
     ['Saved', savedProperties.length, Heart],
     ['Viewed', viewedProperties.length, Search],
-    ['Bookings', bookings.data?.length ?? 0, CalendarCheck],
+    ['Bookings', visibleBookings.length, CalendarCheck],
     ['Invoices', visibleInvoices.length, Receipt],
   ];
 
