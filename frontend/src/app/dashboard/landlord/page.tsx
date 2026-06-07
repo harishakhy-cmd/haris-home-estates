@@ -18,9 +18,11 @@ import { fallbackProperties } from '@/lib/mock-data';
 import { startDGatewayPayment } from '@/lib/payments';
 import { useAuthStore } from '@/store/auth-store';
 import { getLocalBookings, getLocalInquiries } from '@/lib/tenant-activity';
+import { useDashboard } from '@/contexts/DashboardContext';
 
 export default function LandlordDashboard() {
   const { user, token, hydrate, logout } = useAuthStore();
+  const { state: dashboardState } = useDashboard();
   const [removedIds, setRemovedIds] = useState<string[]>([]);
   const [invoiceTenantId, setInvoiceTenantId] = useState('');
   const [invoicePropertyId, setInvoicePropertyId] = useState('');
@@ -87,7 +89,15 @@ export default function LandlordDashboard() {
     const userName = `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim().toLowerCase();
     return property.landlord?.id === user?.id || landlordName === userName;
   });
-  const landlordProperties = ((properties.data?.length ? properties.data : localLandlordProperties) ?? []).filter((property: any) => !removedIds.includes(property.id));
+  
+  // Combine API properties with dashboard real-time updates
+  const allProperties = dashboardState.properties.length > 0
+    ? dashboardState.properties.filter((p: any) => p.ownerId === user?.id)
+    : properties.data?.length
+      ? properties.data
+      : localLandlordProperties;
+  
+  const landlordProperties = (allProperties ?? []).filter((property: any) => !removedIds.includes(property.id));
   const visibleInvoices = invoices.data?.length ? invoices.data : localInvoices;
   const visibleBookings = bookings.data?.length ? bookings.data : localBookingsState;
   const visibleInquiries = inquiries.data?.length ? inquiries.data : localInquiriesState;
