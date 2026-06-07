@@ -20,6 +20,7 @@ import { FriendshipsModule } from './friendships/friendships.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { CallsModule } from './calls/calls.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CallsModule } from './calls/calls.module';
     ReportsModule,
     NotificationsModule,
     CallsModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { api } from '@/lib/api';
 import { useSettingsStore, colorThemes, gradientThemes, googleFontsImport, normalizeGoogleFontName } from '@/store/settings-store';
 import { SettingsModal } from '@/components/layout/settings-modal';
+import { DashboardProvider } from '@/contexts/DashboardContext';
 import { Toaster } from 'sonner';
 
 function DynamicThemeManager() {
@@ -93,11 +94,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <FirebaseAnalytics />
-        <DynamicThemeManager />
-        {children}
-        <SettingsModal />
-        <Toaster theme="system" position="bottom-right" richColors />
+        <DashboardProvider>
+          <FirebaseAnalytics />
+          <DynamicThemeManager />
+          {children}
+          <SettingsModal />
+          <Toaster theme="system" position="bottom-right" richColors />
+        </DashboardProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
