@@ -19,9 +19,9 @@ services:
     env: node
     plan: free
     buildCommand: >
-      cd backend && npm install && npx prisma generate && npm run build
+      bash build.sh
     startCommand: >
-      cd backend && npx prisma db push --skip-generate && node dist/main.js
+      bash start.sh
     envVars:
       - key: DATABASE_URL
         fromDatabase: haris-db
