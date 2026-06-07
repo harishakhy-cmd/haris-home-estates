@@ -297,6 +297,10 @@ function ChatPageContent() {
   const [camEnabled, setCamEnabled] = useState(true);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const ringtoneOscRef = useRef<OscillatorNode | null>(null);
+  const ringtoneGainRef = useRef<GainNode | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingOfferRef = useRef<{ offer: RTCSessionDescriptionInit; senderId: string } | null>(null);
@@ -843,6 +847,49 @@ useEffect(() => {
     { urls: ['turn:openrelay.metered.ca:443'], username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: ['turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
   ];
+  const startRingtone = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const AudioCtor = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext | undefined;
+    if (!AudioCtor) {
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+      return;
+    }
+    try {
+      const ctx = audioContextRef.current || new AudioCtor();
+      audioContextRef.current = ctx;
+      if (ctx.state === 'suspended') {
+        void ctx.resume();
+      }
+      if (ringtoneOscRef.current) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = 440;
+      gain.gain.value = 0.12;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      ringtoneOscRef.current = osc;
+      ringtoneGainRef.current = gain;
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 200]);
+    } catch {
+      if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+    }
+  }, []);
+
+  const stopRingtone = useCallback(() => {
+    if (ringtoneOscRef.current) {
+      try { ringtoneOscRef.current.stop(); } catch { /* ignore */ }
+      ringtoneOscRef.current.disconnect();
+      ringtoneOscRef.current = null;
+    }
+    if (ringtoneGainRef.current) {
+      ringtoneGainRef.current.disconnect();
+      ringtoneGainRef.current = null;
+    }
+    if ('vibrate' in navigator) navigator.vibrate(0);
+  }, []);
+
   const cleanupCall = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
@@ -856,7 +903,9 @@ useEffect(() => {
     setCamEnabled(true);
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-  }, []);
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    stopRingtone();
+  }, [stopRingtone]);
 
   const createPeerConnection = useCallback(
     (targetId: string) => {
@@ -877,8 +926,14 @@ useEffect(() => {
       
       pc.ontrack = (e) => {
         console.log('[WebRTC] Received track:', e.track.kind);
-        if (remoteVideoRef.current && e.streams[0]) {
-          remoteVideoRef.current.srcObject = e.streams[0];
+        if (!e.streams?.[0]) return;
+        const stream = e.streams[0];
+        if (callType === 'video') {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = stream;
+          }
+        } else if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = stream;
         }
       };
       
@@ -1542,7 +1597,7 @@ useEffect(() => {
                     </button>
                   )}
                   
-                  <div className="ml-2 hidden sm:block">
+                  <div className="ml-2">
                     <ThemeSelector />
                   </div>
 
@@ -2026,6 +2081,7 @@ useEffect(() => {
                     callType === 'audio' && 'hidden',
                   )}
                 />
+                <audio ref={remoteAudioRef} autoPlay className="hidden" />
                 {callType === 'audio' && (
                   <div className="flex flex-col items-center gap-4">
                     <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[hsl(var(--primary))]/20">

@@ -8,72 +8,79 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UseGuards } from '@nestjs/common';
+import { UseGuards, Logger, Inject } from '@nestjs/common';
 import { WsJwtGuard } from '../auth/ws-jwt.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { markUserOnline, markUserOffline } from '../users/users.service';
 import { FriendshipsService } from '../friendships/friendships.service';
+import { PresenceService } from '../socket/presence.service';
+import { MessageDeliveryService } from '../socket/message-delivery.service';
+import { FcmService } from '../notifications/fcm.service';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: process.env.FRONTEND_URL || '*' },
+  namespace: '/',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  // Map userId to Set of socket ids for tracking online presence
-  private activeUsers = new Map<string, Set<string>>();
+  private readonly logger = new Logger(ChatGateway.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly friendshipsService: FriendshipsService,
+    private readonly presenceService: PresenceService,
+    private readonly messageDeliveryService: MessageDeliveryService,
+    @Inject('FCM_SERVICE') private readonly fcmService?: FcmService,
   ) {}
 
   async handleConnection(client: Socket) {
-    // Connection is established. We don't authenticate yet, clients will send auth token via handshake
-    // Authentication happens on specific guarded events, or we could manually verify here.
+    this.logger.debug(`Client connected: ${client.id}`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const user = client.data.user;
     if (user?.sub) {
-      const sockets = this.activeUsers.get(user.sub);
-      if (sockets) {
-        sockets.delete(client.id);
-        if (sockets.size === 0) {
-          this.activeUsers.delete(user.sub);
-          markUserOffline(user.sub);
-          // persist lastSeen
-          try { this.prisma.user.update({ where: { id: user.sub }, data: { lastSeen: new Date() } }); } catch { /* ignore */ }
-          this.server.emit('userOffline', { userId: user.sub });
-        }
+      this.logger.debug(`User ${user.sub} disconnected from ${client.id}`);
+      try {
+        await this.presenceService.markUserOffline(user.sub, client.id);
+        this.server.emit('userOffline', { userId: user.sub, timestamp: new Date() });
+      } catch (error: any) {
+        this.logger.error(`Error marking user offline: ${error?.message || 'Unknown error'}`);
       }
     }
   }
 
   @UseGuards(WsJwtGuard)
+  @UseGuards(WsJwtGuard)
   @SubscribeMessage('authenticate')
   async handleAuthenticate(@ConnectedSocket() client: Socket) {
     const user = client.data.user;
-    if (!user?.sub) return;
-
-    if (!this.activeUsers.has(user.sub)) {
-      this.activeUsers.set(user.sub, new Set());
+    if (!user?.sub) {
+      this.logger.warn('Authentication failed: no user sub');
+      return { error: 'Unauthorized' };
     }
-    this.activeUsers.get(user.sub)!.add(client.id);
-    markUserOnline(user.sub);
 
-    client.join(`user_${user.sub}`);
+    try {
+      await this.presenceService.markUserOnline(user.sub, client.id);
 
-    // Join all groups the user is a member of
-    const memberships = await this.prisma.groupMember.findMany({
-      where: { userId: user.sub },
-      select: { groupId: true },
-    });
-    memberships.forEach((m) => client.join(`group_${m.groupId}`));
+      // Join user-specific room
+      client.join(`user_${user.sub}`);
 
-    client.emit('authenticated', { success: true, userId: user.sub });
-    this.server.emit('userOnline', { userId: user.sub });
+      // Join all groups the user is a member of
+      const memberships = await this.prisma.groupMember.findMany({
+        where: { userId: user.sub },
+        select: { groupId: true },
+      });
+      memberships.forEach((m) => client.join(`group_${m.groupId}`));
+
+      client.emit('authenticated', { success: true, userId: user.sub });
+      this.logger.debug(`User ${user.sub} authenticated successfully`);
+      return { success: true, userId: user.sub };
+    } catch (error: any) {
+      this.logger.error(`Authentication error: ${error?.message || 'Unknown error'}`);
+      return { error: error?.message || 'Authentication failed' };
+    }
   }
 
   @UseGuards(WsJwtGuard)
@@ -244,9 +251,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(`group_${group.id}`);
     payload.memberIds.forEach((id) => {
       this.server.to(`user_${id}`).emit('groupCreated', group);
-      const activeUserSockets = this.activeUsers.get(id);
+      const activeUserSockets = this.presenceService.getUserSockets(id);
       if (activeUserSockets) {
-        activeUserSockets.forEach(socketId => {
+        activeUserSockets.forEach((socketId: string) => {
           const socket = this.server.sockets.sockets.get(socketId);
           if (socket) socket.join(`group_${group.id}`);
         });
