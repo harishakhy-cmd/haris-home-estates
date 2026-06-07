@@ -5,6 +5,8 @@ import { CallStateService } from './call-state.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { v4 as uuidv4 } from 'uuid';
 import { PresenceService } from '../socket/presence.service';
+import { RateLimitService } from '../security/rate-limit.service';
+import { RATE_LIMIT_CONFIGS } from '../security/security.constants';
 
 @WebSocketGateway({
   cors: { origin: process.env.SOCKET_IO_CORS_ORIGIN || '*', credentials: true },
@@ -19,6 +21,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private callStateService: CallStateService,
     private prisma: PrismaService,
     private presenceService: PresenceService,
+    private rateLimitService: RateLimitService,
   ) {}
 
   handleConnection(socket: Socket) {
@@ -54,6 +57,12 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { recipientId: string; callType: 'audio' | 'video' }
   ) {
     const initiatorId = socket.data.userId;
+
+    // Rate limiting: 5 calls per second per user
+    if (!this.rateLimitService.isAllowed(initiatorId, RateLimitService.createConfig(RATE_LIMIT_CONFIGS.CALL.maxTokens, RATE_LIMIT_CONFIGS.CALL.refillRate))) {
+      socket.emit('error', { message: 'Too many call attempts. Please slow down.' });
+      return;
+    }
 
     // Check if initiator is already in a call
     if (this.callStateService.isUserInCall(initiatorId)) {
@@ -203,10 +212,17 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() data: { callId: string; candidate: any }
   ) {
+    const userId = socket.data.userId;
+    
+    // Rate limiting: 5 events per second per user (ICE candidates can be many)
+    if (!this.rateLimitService.isAllowed(userId, RateLimitService.createConfig(RATE_LIMIT_CONFIGS.CALL.maxTokens, RATE_LIMIT_CONFIGS.CALL.refillRate))) {
+      return; // silently ignore rate-limited ICE candidates
+    }
+    
     const call = this.callStateService.getCall(data.callId);
     if (!call) return;
 
-    const otherUserId = call.initiatorId === socket.data.userId ? call.recipientId : call.initiatorId;
+    const otherUserId = call.initiatorId === userId ? call.recipientId : call.initiatorId;
     this.server.to(otherUserId).emit('iceCandidate', {
       callId: data.callId,
       candidate: data.candidate,

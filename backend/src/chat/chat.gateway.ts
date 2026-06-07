@@ -8,13 +8,17 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UseGuards, Logger, Inject } from '@nestjs/common';
+import { UseGuards, Logger, Inject, BadRequestException } from '@nestjs/common';
 import { WsJwtGuard } from '../auth/ws-jwt.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { FriendshipsService } from '../friendships/friendships.service';
 import { PresenceService } from '../socket/presence.service';
 import { MessageDeliveryService } from '../socket/message-delivery.service';
 import { FcmService } from '../notifications/fcm.service';
+import { RateLimitService } from '../security/rate-limit.service';
+import { ValidationService } from '../security/validation.service';
+import { AuthorizationService } from '../security/authorization.service';
+import { RATE_LIMIT_CONFIGS } from '../security/security.constants';
 
 @WebSocketGateway({
   cors: { origin: process.env.FRONTEND_URL || '*' },
@@ -31,6 +35,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly friendshipsService: FriendshipsService,
     private readonly presenceService: PresenceService,
     private readonly messageDeliveryService: MessageDeliveryService,
+    private readonly rateLimitService: RateLimitService,
+    private readonly validationService: ValidationService,
+    private readonly authorizationService: AuthorizationService,
     @Inject('FCM_SERVICE') private readonly fcmService?: FcmService,
   ) {}
 
@@ -91,6 +98,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const user = client.data.user;
 
+    // Rate limiting: 10 messages per second per user
+    if (!this.rateLimitService.isAllowed(user.sub, RateLimitService.createConfig(RATE_LIMIT_CONFIGS.MESSAGE.maxTokens, RATE_LIMIT_CONFIGS.MESSAGE.refillRate))) {
+      return { error: 'Too many messages. Please slow down.' };
+    }
+
+    // Validate message content
+    try {
+      const sanitizedContent = this.validationService.sanitizeMessage(payload.content, 5000);
+      payload.content = sanitizedContent;
+    } catch (error) {
+      return { error: (error as any).message || 'Invalid message content' };
+    }
+
     // Verify recipient or group
     if (payload.groupId) {
       const member = await this.prisma.groupMember.findUnique({
@@ -149,10 +169,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('deleteMessage')
   async handleDeleteMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: string }) {
     const userId = client.data.user.sub;
+    
+    try {
+      await this.authorizationService.requirePermission(userId, 'DELETE_MESSAGE', payload.messageId);
+    } catch (error) {
+      return { error: (error as any).message || 'Not allowed to delete this message' };
+    }
+    
     const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
     if (!msg) return { error: 'Message not found' };
-    if (msg.senderId !== userId) return { error: 'Not allowed' };
+    
     await this.prisma.message.update({ where: { id: payload.messageId }, data: { deletedAt: new Date() } });
+    
     // notify involved parties
     if (msg.groupId) this.server.to(`group_${msg.groupId}`).emit('messageDeleted', { messageId: payload.messageId });
     else if (msg.recipientId) {
@@ -166,13 +194,33 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('editMessage')
   async handleEditMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: string; content: string }) {
     const userId = client.data.user.sub;
+    
+    // Validate message content
+    try {
+      const sanitizedContent = this.validationService.sanitizeMessage(payload.content, 5000);
+      payload.content = sanitizedContent;
+    } catch (error) {
+      return { error: (error as any).message || 'Invalid message content' };
+    }
+    
+    try {
+      await this.authorizationService.requirePermission(userId, 'DELETE_MESSAGE', payload.messageId);
+    } catch (error) {
+      return { error: (error as any).message || 'Not allowed to edit this message' };
+    }
+    
     const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
     if (!msg) return { error: 'Message not found' };
-    if (msg.senderId !== userId) return { error: 'Not allowed' };
+    
     const created = msg.createdAt;
     const tenSeconds = 10000;
     if (new Date().getTime() - created.getTime() > tenSeconds) return { error: 'Edit window expired' };
-    const edited = await this.prisma.message.update({ where: { id: payload.messageId }, data: { content: payload.content, editedAt: new Date(), editedContent: payload.content } });
+    
+    const edited = await this.prisma.message.update({ 
+      where: { id: payload.messageId }, 
+      data: { content: payload.content, editedAt: new Date(), editedContent: payload.content } 
+    });
+    
     // broadcast edit
     if (edited.groupId) this.server.to(`group_${edited.groupId}`).emit('messageEdited', edited);
     else if (edited.recipientId) {
@@ -189,6 +237,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { recipientId?: string; groupId?: string; isTyping: boolean },
   ) {
     const senderId = client.data.user.sub;
+    
+    // Rate limiting: 20 typing events per second per user
+    if (!this.rateLimitService.isAllowed(senderId, RateLimitService.createConfig(RATE_LIMIT_CONFIGS.TYPING.maxTokens, RATE_LIMIT_CONFIGS.TYPING.refillRate))) {
+      return; // silently ignore rate-limited typing events
+    }
+    
     if (payload.groupId) {
       const member = await this.prisma.groupMember.findUnique({
         where: { groupId_userId: { groupId: payload.groupId, userId: senderId } },
