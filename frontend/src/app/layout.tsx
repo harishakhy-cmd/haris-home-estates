@@ -4,6 +4,7 @@ import { ReactNode } from 'react';
 import { Providers } from './providers';
 import { BottomNav } from '@/components/layout/bottom-nav';
 import { Sidebar } from '@/components/layout/sidebar';
+import { PWAProvider } from '@/components/pwa/PWAProvider';
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://hakhybeat.web.app';
 
@@ -120,11 +121,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <img src="/haris-logo.png" className="splash-pulse-logo" alt="HARIS Logo" />
         </div>
         <Providers>
-          <div className="flex min-h-screen">
-            <Sidebar />
-            <div className="flex-1 min-h-screen pb-16 md:pb-0">{children}</div>
-          </div>
-          <BottomNav />
+          <PWAProvider>
+            <div className="flex min-h-screen">
+              <Sidebar />
+              <div className="flex-1 min-h-screen pb-16 md:pb-0">{children}</div>
+            </div>
+            <BottomNav />
+          </PWAProvider>
         </Providers>
       </body>
     </html>
