@@ -3,6 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/env.validation';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { MulterModule } from '@nestjs/platform-express';
+
+import { SecurityModule } from './security/security.module';
+
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
@@ -24,14 +27,27 @@ import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate }),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate,
+    }),
+
+    SecurityModule,
+
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 120,
+      },
+    ]),
+
     MulterModule.register({
       limits: {
-        fileSize: 50 * 1024 * 1024, // 50 MB
+        fileSize: 50 * 1024 * 1024,
         files: 1,
       },
     }),
+
     PrismaModule,
     AuthModule,
     UsersModule,
