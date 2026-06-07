@@ -4,10 +4,5 @@ set -e
 echo "Starting backend application..."
 cd backend
 
-# Run Prisma migrations
-echo "Syncing database..."
-npx prisma db push --skip-generate || echo "Database push skipped (already synced)"
-
-# Start the application
-echo "Starting NestJS application..."
-node dist/main.js
+echo "NestJS application starting on port 3000..."
+exec node dist/main.js
