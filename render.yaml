@@ -19,12 +19,34 @@ services:
     env: node
     plan: free
     buildCommand: >
-      cd backend && npm install && npm run build
+      cd backend && npm install && npx prisma generate && npm run build
     startCommand: >
-      npm run start
+      cd backend && npx prisma db push --skip-generate && node dist/main.js
     envVars:
       - key: DATABASE_URL
         fromDatabase: haris-db
       - key: JWT_SECRET
         fromSecret: jwt-secret
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: LOG_LEVEL
+        value: info
+      - key: JWT_ACCESS_EXPIRATION
+        value: "15m"
+      - key: JWT_REFRESH_EXPIRATION
+        value: "7d"
+      - key: CORS_ORIGIN
+        value: "https://harisv2.web.app"
+      - key: FRONTEND_URL
+        value: "https://harisv2.web.app"
+      - key: SOCKET_IO_CORS
+        value: "https://harisv2.web.app"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: "100"
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
     autoDeploy: true
