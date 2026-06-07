@@ -4,12 +4,14 @@ import { InvoiceStatus, PaymentProvider, PaymentStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaymentIntentDto, PaymentWebhookDto } from './dto/payment.dto';
+import { DashboardGateway } from '../dashboard/dashboard.gateway';
 
 @Injectable()
 export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly dashboardGateway: DashboardGateway,
   ) {}
 
   async createIntent(user: any, dto: CreatePaymentIntentDto) {
@@ -87,6 +89,20 @@ export class PaymentsService {
 
     if (status === PaymentStatus.SUCCEEDED && metadata?.invoiceId) {
       await this.prisma.invoice.update({ where: { id: metadata.invoiceId }, data: { status: InvoiceStatus.PAID } });
+
+      // Emit dashboard event for payment received
+      const invoice = await this.prisma.invoice.findUnique({ where: { id: metadata.invoiceId } });
+      if (invoice && invoice.propertyId) {
+        this.dashboardGateway.emitPaymentReceived({
+          id: payment.id,
+          amount: payment.amount.toNumber(),
+          landlordId: invoice.issuerId,
+          tenantId: invoice.recipientId,
+          propertyId: invoice.propertyId,
+          status: payment.status,
+          createdAt: payment.createdAt,
+        });
+      }
     }
 
     return { ok: true, reference: payment.reference, status };

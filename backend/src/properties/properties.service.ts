@@ -3,6 +3,7 @@ import { Prisma, PropertyStatus, UserRole } from '@prisma/client';
 import { paginate } from '../common/dto/pagination.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePropertyDto, PropertyFilterDto, UpdatePropertyDto } from './dto/property.dto';
+import { DashboardGateway } from '../dashboard/dashboard.gateway';
 
 const include = { images: true, amenities: true, landlord: { select: { id: true, firstName: true, lastName: true, phone: true, whatsapp: true, verified: true, verificationBadge: true } }, reviews: true };
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -12,7 +13,11 @@ import { ChatGateway } from '../chat/chat.gateway';
 
 @Injectable()
 export class PropertiesService {
-  constructor(private readonly prisma: PrismaService, private readonly chatGateway: ChatGateway) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly chatGateway: ChatGateway,
+    private readonly dashboardGateway: DashboardGateway,
+  ) {}
 
   async findAll(filter: PropertyFilterDto) {
     const where: Prisma.PropertyWhereInput = {
@@ -79,6 +84,19 @@ export class PropertiesService {
     // Broadcast notification to all online users via WebSocket
     this.chatGateway.broadcastPropertyUpload(property);
 
+    // Emit dashboard event for real-time updates
+    this.dashboardGateway.emitPropertyCreated({
+      id: property.id,
+      title: property.title,
+      description: property.description,
+      type: property.propertyType,
+      price: property.price.toNumber(),
+      ownerId: property.landlordId,
+      location: property.address,
+      images: property.images.map((img) => img.url),
+      createdAt: property.createdAt,
+    });
+
     return property;
   }
 
@@ -88,7 +106,7 @@ export class PropertiesService {
     if (user.role !== UserRole.ADMIN && property.landlordId !== user.id) throw new ForbiddenException();
     const { imageUrls, amenityIds, amenityNames, youtubeUrls, nearbyFacilities, ...propertyData } = dto;
     const cleanAmenityNames = cleanList(amenityNames);
-    return this.prisma.property.update({
+    const updatedProperty = await this.prisma.property.update({
       where: { id },
       data: {
         ...propertyData,
@@ -105,6 +123,19 @@ export class PropertiesService {
       },
       include,
     });
+
+    // Emit dashboard event for property updates
+    this.dashboardGateway.emitPropertyUpdated({
+      id: updatedProperty.id,
+      title: updatedProperty.title,
+      description: updatedProperty.description,
+      price: updatedProperty.price.toNumber(),
+      ownerId: updatedProperty.landlordId,
+      status: updatedProperty.status,
+      updatedAt: updatedProperty.updatedAt,
+    });
+
+    return updatedProperty;
   }
 
   async remove(user: any, id: string) {

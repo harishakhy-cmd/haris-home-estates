@@ -2,10 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { BookingStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/booking.dto';
+import { DashboardGateway } from '../dashboard/dashboard.gateway';
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dashboardGateway: DashboardGateway,
+  ) {}
 
   async create(tenantId: string, dto: CreateBookingDto) {
     const property = await this.prisma.property.findUnique({ where: { id: dto.propertyId } });
@@ -19,6 +23,17 @@ export class BookingsService {
   }
 
   updateStatus(id: string, status: BookingStatus) {
-    return this.prisma.booking.update({ where: { id }, data: { status } });
+    return this.prisma.booking.update({ where: { id }, data: { status } }).then((booking) => {
+      // Emit dashboard event for booking status change
+      this.dashboardGateway.emitBookingStatusChanged({
+        id: booking.id,
+        status: booking.status,
+        tenantId: booking.tenantId,
+        landlordId: booking.landlordId,
+        propertyId: booking.propertyId,
+        updatedAt: booking.updatedAt,
+      });
+      return booking;
+    });
   }
 }
