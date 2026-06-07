@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/env.validation';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { MulterModule } from '@nestjs/platform-express';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { BookingsModule } from './bookings/bookings.module';
@@ -23,6 +24,12 @@ import { NotificationsModule } from './notifications/notifications.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
+    MulterModule.register({
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50 MB
+        files: 1,
+      },
+    }),
     PrismaModule,
     AuthModule,
     UsersModule,
