@@ -33,6 +33,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { UserSearchModal } from '@/components/layout/user-search-modal';
 import ThemeSelector from '@/components/chat/ThemeSelector';
 import { FriendRequestsModal } from '@/components/layout/friend-requests-modal';
+import { VoiceRecorder } from '@/components/chat/VoiceRecorder';
 import { toast } from 'sonner';
 import { getLocalUsers } from '@/lib/local-auth';
 
