@@ -6,14 +6,14 @@
     "dev": "nest start --watch",
     "start:dev": "nest start --watch",
     "start": "node dist/main.js",
-    "build": "nest build",
+    "build": "npx nest build",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
-    "render:build": "npx prisma generate && nest build",
+    "render:build": "npx prisma generate && npx nest build",
     "start:render": "node dist/main.js"
   },
   "dependencies": {
