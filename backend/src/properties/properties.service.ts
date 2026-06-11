@@ -100,7 +100,7 @@ export class PropertiesService {
     return property;
   }
 
-  async update(user: any, id: string, dto: UpdatePropertyDto) {
+  async update(user: { id: string; role: UserRole }, id: string, dto: UpdatePropertyDto) {
     const property = await this.prisma.property.findUnique({ where: { id } });
     if (!property) throw new NotFoundException('Property not found');
     if (user.role !== UserRole.ADMIN && property.landlordId !== user.id) throw new ForbiddenException();
@@ -138,7 +138,7 @@ export class PropertiesService {
     return updatedProperty;
   }
 
-  async remove(user: any, id: string) {
+  async remove(user: { id: string; role: UserRole }, id: string) {
     const property = await this.prisma.property.findUnique({ where: { id } });
     if (!property) throw new NotFoundException('Property not found');
     if (user.role !== UserRole.ADMIN && property.landlordId !== user.id) throw new ForbiddenException();

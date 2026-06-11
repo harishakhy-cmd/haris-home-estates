@@ -24,8 +24,9 @@ export class FcmService {
         admin.initializeApp({
           credential: admin.credential.applicationDefault(),
         });
-      } catch (error: any) {
-        console.warn('Firebase initialization skipped (development mode):', error?.message || 'Unknown error');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.warn('Firebase initialization skipped (development mode):', errorMessage);
       }
     }
   }
@@ -144,7 +145,7 @@ export class FcmService {
         },
       },
       android: {
-        priority: 'high' as any,
+        priority: 'high',
         notification: {
           title: payload.title,
           body: payload.body,
@@ -161,17 +162,21 @@ export class FcmService {
       for (const token of tokens) {
         try {
           await admin.messaging().send(message as any);
-        } catch (error: any) {
+        } catch (error) {
           // Handle invalid tokens
-          if (error?.code === 'messaging/invalid-registration-token' ||
-              error?.code === 'messaging/mismatched-credential' ||
-              error?.code === 'messaging/message-rate-exceeded') {
-            await this.removeToken(error.uid, token);
+          const err = error as { code?: string; uid?: string };
+          if (err.code === 'messaging/invalid-registration-token' ||
+              err.code === 'messaging/mismatched-credential' ||
+              err.code === 'messaging/message-rate-exceeded') {
+            if (err.uid) {
+              await this.removeToken(err.uid, token);
+            }
           }
         }
       }
     } catch (error) {
-      console.error('Error sending FCM notification:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error sending FCM notification:', errorMessage);
     }
   }
 

@@ -86,8 +86,26 @@ export class UsersService {
     return user;
   }
 
-  update(id: string, data: any) {
-    const { passwordHash, role, verified, ...safe } = data;
+  update(id: string, data: Partial<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    whatsapp: string;
+    avatarUrl: string;
+    bio: string;
+    location: string;
+    momoNumber: string;
+    momoProvider: string;
+    bankName: string;
+    bankAccount: string;
+    paymentPreference: string;
+    statusText: string;
+    passwordHash: string;
+    role: string;
+    verified: boolean;
+  }>) {
+    const { passwordHash: _passwordHash, role: _role, verified: _verified, ...safe } = data;
     return this.prisma.user.update({
       where: { id },
       data: safe,

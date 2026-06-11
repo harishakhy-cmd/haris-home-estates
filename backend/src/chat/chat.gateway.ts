@@ -52,13 +52,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       try {
         await this.presenceService.markUserOffline(user.sub, client.id);
         this.server.emit('userOffline', { userId: user.sub, timestamp: new Date() });
-      } catch (error: any) {
-        this.logger.error(`Error marking user offline: ${error?.message || 'Unknown error'}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(`Error marking user offline: ${errorMessage}`);
       }
     }
   }
 
-  @UseGuards(WsJwtGuard)
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('authenticate')
   async handleAuthenticate(@ConnectedSocket() client: Socket) {
@@ -84,9 +84,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.emit('authenticated', { success: true, userId: user.sub });
       this.logger.debug(`User ${user.sub} authenticated successfully`);
       return { success: true, userId: user.sub };
-    } catch (error: any) {
-      this.logger.error(`Authentication error: ${error?.message || 'Unknown error'}`);
-      return { error: error?.message || 'Authentication failed' };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Authentication error: ${errorMessage}`);
+      return { error: errorMessage || 'Authentication failed' };
     }
   }
 
@@ -108,7 +109,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const sanitizedContent = this.validationService.sanitizeMessage(payload.content, 5000);
       payload.content = sanitizedContent;
     } catch (error) {
-      return { error: (error as any).message || 'Invalid message content' };
+      const errorMessage = error instanceof Error ? error.message : 'Invalid message content';
+      return { error: errorMessage };
     }
 
     // Verify recipient or group
@@ -173,7 +175,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       await this.authorizationService.requirePermission(userId, 'DELETE_MESSAGE', payload.messageId);
     } catch (error) {
-      return { error: (error as any).message || 'Not allowed to delete this message' };
+      const errorMessage = error instanceof Error ? error.message : 'Not allowed to delete this message';
+      return { error: errorMessage };
     }
     
     const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
@@ -200,13 +203,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const sanitizedContent = this.validationService.sanitizeMessage(payload.content, 5000);
       payload.content = sanitizedContent;
     } catch (error) {
-      return { error: (error as any).message || 'Invalid message content' };
+      const errorMessage = error instanceof Error ? error.message : 'Invalid message content';
+      return { error: errorMessage };
     }
     
     try {
       await this.authorizationService.requirePermission(userId, 'DELETE_MESSAGE', payload.messageId);
     } catch (error) {
-      return { error: (error as any).message || 'Not allowed to edit this message' };
+      const errorMessage = error instanceof Error ? error.message : 'Not allowed to edit this message';
+      return { error: errorMessage };
     }
     
     const msg = await this.prisma.message.findUnique({ where: { id: payload.messageId } });
@@ -320,7 +325,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // WebRTC Signaling
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcOffer')
-  async handleWebRtcOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp?: any; offer?: any; isVideo?: boolean; callType?: string }) {
+  async handleWebRtcOffer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp?: object; offer?: object; isVideo?: boolean; callType?: string }) {
     const callerId = client.data.user.sub;
     const canCall = await this.friendshipsService.areFriendsAndNotBlocked(callerId, payload.targetId);
     if (!canCall) return;
@@ -337,7 +342,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcAnswer')
-  async handleWebRtcAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp?: any; answer?: any }) {
+  async handleWebRtcAnswer(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; sdp?: object; answer?: object }) {
     const responderId = client.data.user.sub;
     const canCall = await this.friendshipsService.areFriendsAndNotBlocked(responderId, payload.targetId);
     if (!canCall) return;
@@ -351,7 +356,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('webrtcIceCandidate')
-  async handleWebRtcIceCandidate(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; candidate: any }) {
+  async handleWebRtcIceCandidate(@ConnectedSocket() client: Socket, @MessageBody() payload: { targetId: string; candidate: object }) {
     const senderId = client.data.user.sub;
     const canCall = await this.friendshipsService.areFriendsAndNotBlocked(senderId, payload.targetId);
     if (!canCall) return;
@@ -371,7 +376,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // Notification broadcast called from external services
-  broadcastPropertyUpload(property: any) {
+  broadcastPropertyUpload(property: { title: string; id: string; city: string; price: { toNumber(): number } }) {
     this.server.emit('newProperty', {
       message: `A new property '${property.title}' has been listed!`,
       propertyId: property.id,
