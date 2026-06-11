@@ -17,11 +17,12 @@ services:
   - type: web
     name: haris-backend
     env: node
+    region: oregon
     plan: free
     buildCommand: >
-      bash build.sh
+      cd backend && npm install && npx prisma generate && npm run build
     startCommand: >
-      bash start.sh
+      cd backend && node dist/main.js
     envVars:
       - key: DATABASE_URL
         fromDatabase: haris-db
