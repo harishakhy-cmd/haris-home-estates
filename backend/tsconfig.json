@@ -14,8 +14,8 @@
     "strict": true,
     "skipLibCheck": true,
     "strictPropertyInitialization": false,
-
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "ignoreDeprecations": "5.0"
   },
   "include": ["src/**/*.ts", "prisma/**/*.ts", "test/**/*.ts"]
 }

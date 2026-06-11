@@ -20,9 +20,9 @@ services:
     region: oregon
     plan: free
     buildCommand: >
-      cd backend && npm install && npm run prisma:generate && npm run build
+      npm install && npx prisma generate && npm run build
     startCommand: >
-      cd backend && npm run start
+      node dist/main.js
     envVars:
       - key: DATABASE_URL
         fromDatabase: haris-db
